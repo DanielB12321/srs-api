@@ -1,10 +1,13 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from .api_views import ReferenceImportViewSet
 from .views import (
     AnalysisRunViewSet,
     DatasetViewSet,
+    DepositClassificationViewSet,
     ElementViewSet,
+    MineralViewSet,
     ReferenceDepositViewSet,
     ReferenceSampleMeasurementViewSet,
     ReferenceSampleViewSet,
@@ -14,13 +17,18 @@ from .views import (
 )
 
 router = DefaultRouter()
-router.register("datasets", DatasetViewSet)
-router.register("samples", SampleViewSet)
-router.register("sample-measurements", SampleMeasurementViewSet)
-router.register("elements", ElementViewSet)
+# Reference library
+router.register("reference-imports", ReferenceImportViewSet)
+router.register("minerals", MineralViewSet)
+router.register("deposit-classifications", DepositClassificationViewSet)
 router.register("reference-deposits", ReferenceDepositViewSet)
 router.register("reference-samples", ReferenceSampleViewSet)
 router.register("reference-sample-measurements", ReferenceSampleMeasurementViewSet)
+router.register("elements", ElementViewSet)
+# Pre-existing
+router.register("datasets", DatasetViewSet)
+router.register("samples", SampleViewSet)
+router.register("sample-measurements", SampleMeasurementViewSet)
 router.register("analysis-runs", AnalysisRunViewSet)
 router.register("similarity-results", SimilarityResultViewSet)
 

@@ -17,6 +17,7 @@ class ReferenceImport(models.Model):
     ]
 
     source_name = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
     data_file = models.FileField(upload_to="srs/reference_imports/")
     metadata_file = models.FileField(upload_to="srs/reference_imports/")
     data_sha256 = models.CharField(max_length=255, blank=True)
@@ -81,7 +82,7 @@ class ReferenceDeposit(models.Model):
         blank=True,
     )
     name = models.CharField(max_length=255)
-    three_char_code = models.CharField(max_length=3, db_index=True)
+    three_char_code = models.CharField(max_length=3, db_index=True, default="")
     deposit_type = models.CharField(max_length=100, blank=True)
     mineral_system = models.CharField(max_length=100, blank=True)
     latitude = models.FloatField(null=True, blank=True)

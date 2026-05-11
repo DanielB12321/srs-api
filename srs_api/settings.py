@@ -88,11 +88,13 @@ WSGI_APPLICATION = 'srs_api.wsgi.application'
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
 
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
 DATABASES = {
     "default": dj_database_url.config(
-        default=os.environ.get("DATABASE_URL"),
+        default=DATABASE_URL or f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
         conn_max_age=600,
-        ssl_require=True,
+        ssl_require=bool(DATABASE_URL) and not DEBUG,
     )
 }
 
@@ -134,6 +136,11 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+# Media files (user uploads — ReferenceImport workbooks, etc.)
+MEDIA_URL = "media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
@@ -147,6 +154,9 @@ CORS_ALLOWED_ORIGINS = os.environ.get(
 
 REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'DEFAULT_PAGINATION_CLASS':
+        'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 100,
 }
 
 SPECTACULAR_SETTINGS = {
@@ -155,3 +165,7 @@ SPECTACULAR_SETTINGS = {
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
 }
+
+# Allow up to 50 MB for the reference-library workbook pair.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024
+FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024   # spill larger files to a temp file
