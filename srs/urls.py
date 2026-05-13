@@ -1,10 +1,9 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from .api_views import ReferenceImportViewSet
+from .api_views import ReferenceImportViewSet, DatasetViewSet
 from .views import (
     AnalysisRunViewSet,
-    DatasetViewSet,
     DepositClassificationViewSet,
     ElementViewSet,
     MineralViewSet,
