@@ -115,7 +115,32 @@ class DatasetSerializer(serializers.ModelSerializer):
     class Meta:
         model = Dataset
         fields = "__all__"
+        read_only_fields = [
+            "original_filename",
+            "file_sha256",
+            "status",
+            "row_count",
+            "col_count",
+            "null_count",
+            "stats",
+            "errors",
+            "completed_at",
+            "created_at",
+            "updated_at",
+        ]
 
+class DatasetUploadSerializer(serializers.ModelSerializer):
+    uploaded_file = serializers.FileField(required=True)
+
+    class Meta:
+        model = Dataset
+        fields = [
+            "name",
+            "description",
+            "uploaded_file",
+            "uploaded_by_id",
+            "uploaded_by_email",
+        ]
 
 class SampleSerializer(serializers.ModelSerializer):
     class Meta:
