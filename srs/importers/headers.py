@@ -6,6 +6,8 @@ on continuation columns); the second row holds the analytical detail. We
 forward-fill row 1 across blanks, then combine with row 2 to produce one
 header per column.
 """
+
+from __future__ import annotations
 from typing import Iterable
 
 

@@ -4,14 +4,18 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
-from .importers import run_import
+from .importers import run_import, run_dataset_import
 
-from .models import ReferenceImport
+
+
+from .models import ReferenceImport, Dataset
 from .serializers import (
     ReferenceImportSerializer,
     ReferenceImportUploadSerializer,
+    DatasetSerializer,
+    DatasetUploadSerializer
 )
 
 def _sha256_of(uploaded_file) -> str:
@@ -82,3 +86,73 @@ class ReferenceImportViewSet(viewsets.ModelViewSet):
         run_import(import_row.id)
 
         return Response(ReferenceImportSerializer(import_row).data)
+
+
+class DatasetViewSet(viewsets.ModelViewSet):
+
+    # POST   /api/srs/datasets/          -> upload a dataset CSV
+    # GET    /api/srs/datasets/          -> list datasets (status, counts, timestamps)
+    # GET    /api/srs/datasets/{id}/     -> single dataset detail + errors
+    # DELETE /api/srs/datasets/{id}/     -> remove a dataset and its derived rows (CASCADE)
+
+    queryset = Dataset.objects.all().order_by("-created_at")
+    parser_classes = (MultiPartParser, FormParser, JSONParser)
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return DatasetUploadSerializer
+        return DatasetSerializer
+
+    def create(self, request, *args, **kwargs):
+        upload = self.get_serializer(data=request.data)
+        upload.is_valid(raise_exception=True)
+
+        uploaded_file = upload.validated_data["uploaded_file"]
+        file_hash = _sha256_of(uploaded_file)
+
+        existing = Dataset.objects.filter(file_sha256=file_hash).first()
+
+        if existing is not None:
+            return Response(
+                DatasetSerializer(existing).data,
+                status=status.HTTP_200_OK,
+            )
+
+        with transaction.atomic():
+            dataset = upload.save(
+                original_filename=uploaded_file.name,
+                file_sha256=file_hash,
+                status=Dataset.STATUS_PENDING,
+            )
+
+        try:
+            run_dataset_import(dataset.id)
+        except Exception:
+            dataset.refresh_from_db()
+            return Response(
+                DatasetSerializer(dataset).data,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        dataset.refresh_from_db()
+
+        return Response(
+            DatasetSerializer(dataset).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=["post"], url_path="rerun")
+    def rerun(self, request, pk=None):
+        dataset = self.get_object()
+
+        try:
+            run_dataset_import(dataset.id)
+        except Exception:
+            dataset.refresh_from_db()
+            return Response(
+                DatasetSerializer(dataset).data,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        dataset.refresh_from_db()
+        return Response(DatasetSerializer(dataset).data)

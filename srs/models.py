@@ -184,9 +184,38 @@ class ReferenceSampleMeasurement(models.Model):
 # Pre-existing models below   
 
 class Dataset(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_RUNNING = "running"
+    STATUS_COMPLETED = "completed"
+    STATUS_FAILED = "failed"
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_RUNNING, "Running"),
+        (STATUS_COMPLETED, "Completed"),
+        (STATUS_FAILED, "Failed"),
+    ]
+
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True)
+
     uploaded_file = models.FileField(upload_to="srs/datasets/", blank=True, null=True)
+    original_filename = models.CharField(max_length=255, blank=True)
+    file_sha256 = models.CharField(max_length=64, blank=True, db_index=True)
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+    )
+
+    row_count = models.PositiveIntegerField(default=0)
+    col_count = models.PositiveIntegerField(default=0)
+    null_count = models.PositiveIntegerField(default=0)
+
+    stats = models.JSONField(default=dict, blank=True)
+    errors = models.JSONField(default=list, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
 
     uploaded_by_id = models.IntegerField(null=True, blank=True)
     uploaded_by_email = models.EmailField(blank=True)
