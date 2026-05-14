@@ -12,7 +12,6 @@ from .models import (
     #Others
     AnalysisRun,
     Dataset,
-    ReferenceSample,
     Sample,
     SampleMeasurement,
     SimilarityResult
@@ -165,3 +164,31 @@ class SimilarityResultSerializer(serializers.ModelSerializer):
     class Meta:
         model = SimilarityResult
         fields = "__all__"
+
+# Reference Library Search Query Result Serializer
+
+class ReferenceSampleMeasurementInlineSerializer(serializers.ModelSerializer):
+    element_symbol = serializers.CharField(source="element.symbol", read_only=True)
+
+    class Meta:
+        model  = ReferenceSampleMeasurement
+        fields = [
+            "element_symbol", "analytical_method", "value", "unit",
+            "below_detection_limit", "detection_limit",
+        ]
+
+
+class ReferenceLibrarySearchResultSerializer(serializers.ModelSerializer):
+    deposit_name   = serializers.CharField(source="reference_deposit.name",           allow_null=True, default=None)
+    deposit_type   = serializers.CharField(source="reference_deposit.deposit_type",   allow_null=True, default=None)
+    mineral_system = serializers.CharField(source="reference_deposit.mineral_system", allow_null=True, default=None)
+    country        = serializers.CharField(source="reference_deposit.country",        allow_null=True, default=None)
+    measurements   = ReferenceSampleMeasurementInlineSerializer(many=True, read_only=True)
+
+    class Meta:
+        model  = ReferenceSample
+        fields = [
+            "id", "sample_code", "sample_type", "latitude", "longitude",
+            "deposit_name", "deposit_type", "mineral_system", "country",
+            "metadata", "measurements",
+        ]
