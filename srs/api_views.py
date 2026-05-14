@@ -1,4 +1,5 @@
 import hashlib
+import threading
 
 from django.db import transaction
 from django.utils import timezone
@@ -72,13 +73,14 @@ class ReferenceImportViewSet(viewsets.ModelViewSet):
                 status=ReferenceImport.STATUS_PENDING,
             )
 
-        run_import(import_row.id)
+        threading.Thread(target=run_import, args=[import_row.id], daemon=True).start()
 
         return Response(
             ReferenceImportSerializer(import_row).data,
-            status=status.HTTP_201_CREATED,
+            status=status.HTTP_202_ACCEPTED,
         )
 
+    @extend_schema(request=None, responses={202: ReferenceImportSerializer})
     @action(detail=True, methods=["post"], url_path="rerun")
     def rerun(self, request, pk=None):
         """Re-parse the stored workbook pair without re-uploading."""
@@ -89,9 +91,9 @@ class ReferenceImportViewSet(viewsets.ModelViewSet):
         import_row.completed_at = None
         import_row.save(update_fields=["status", "errors", "stats", "completed_at"])
 
-        run_import(import_row.id)
+        threading.Thread(target=run_import, args=[import_row.id], daemon=True).start()
 
-        return Response(ReferenceImportSerializer(import_row).data)
+        return Response(ReferenceImportSerializer(import_row).data, status=status.HTTP_202_ACCEPTED)
 
 
 class DatasetViewSet(viewsets.ModelViewSet):
