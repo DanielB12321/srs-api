@@ -59,7 +59,7 @@ class ReferenceImportViewSet(viewsets.ModelViewSet):
         existing = ReferenceImport.objects.filter(
             data_sha256=data_hash,
             metadata_sha256=metadata_hash,
-        ).first()
+        ).exclude(status=ReferenceImport.STATUS_FAILED).first()
         if existing is not None:
             return Response(
                 ReferenceImportSerializer(existing).data,

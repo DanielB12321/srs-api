@@ -49,6 +49,9 @@ def _split_element_and_unit(column_name):
 
 
 def run_dataset_import(dataset_id):
+    from django.db import close_old_connections
+    close_old_connections()
+
     dataset = Dataset.objects.get(id=dataset_id)
 
     dataset.status = Dataset.STATUS_RUNNING

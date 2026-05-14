@@ -53,6 +53,10 @@ from .seed_data import ELEMENTS, ELEMENT_METHOD_OVERRIDES, NON_ELEMENT_COLUMNS
 # top level entry 
 
 def run_import(import_id: int) -> ReferenceImport:
+    # Ensure this thread has a fresh DB connection (required when called from a background thread)
+    from django.db import close_old_connections
+    close_old_connections()
+
     import_row = ReferenceImport.objects.get(pk=import_id)
     import_row.status = ReferenceImport.STATUS_RUNNING
     import_row.errors = []
