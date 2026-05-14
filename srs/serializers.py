@@ -1,4 +1,11 @@
+from drf_spectacular.utils import extend_schema_field
+from drf_spectacular.types import OpenApiTypes
 from rest_framework import serializers
+
+
+@extend_schema_field(OpenApiTypes.BINARY)
+class BinaryFileField(serializers.FileField):
+    pass
 
 from .models import (
     #Reference Library
@@ -35,6 +42,9 @@ class ReferenceImportSerializer(serializers.ModelSerializer):
 
 
 class ReferenceImportUploadSerializer(serializers.ModelSerializer):
+    data_file     = BinaryFileField()
+    metadata_file = BinaryFileField()
+
     class Meta:
         model = ReferenceImport
         fields = (
