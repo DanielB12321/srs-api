@@ -107,12 +107,14 @@ def seed_lookups(meta_wb) -> None:
     )
 
     ws = meta_wb["Mineral Codes"]
+    seen_codes: set = set()
+    mineral_objects = []
+    for name, code, *_ in ws.iter_rows(min_row=2, values_only=True):
+        if code and name and code not in seen_codes:
+            seen_codes.add(code)
+            mineral_objects.append(Mineral(code=code, name=name))
     Mineral.objects.bulk_create(
-        [
-            Mineral(code=code, name=name)
-            for name, code, *_ in ws.iter_rows(min_row=2, values_only=True)
-            if code and name
-        ],
+        mineral_objects,
         update_conflicts=True,
         unique_fields=["code"],
         update_fields=["name"],
@@ -120,12 +122,17 @@ def seed_lookups(meta_wb) -> None:
 
     ws = meta_wb["Ore Deposit Classification"]
     current_class = None
+    seen_cls: set = set()
     classification_objects = []
     for cls, sub, notes in ws.iter_rows(min_row=2, values_only=True):
         if cls:
             current_class = cls
         if current_class is None:
             continue
+        key = (current_class, sub or "")
+        if key in seen_cls:
+            continue
+        seen_cls.add(key)
         classification_objects.append(DepositClassification(
             deposit_class=current_class,
             sub_class=sub or "",
@@ -147,9 +154,10 @@ def load_deposits(meta_wb, import_row, stats) -> dict[str, ReferenceDeposit]:
     deposit_objects = []
     seen = set()
     for name, three_char, cls, sub, lng, lat in ws.iter_rows(min_row=2, values_only=True):
-        if not name or not three_char or three_char in seen:
+        key = (name, three_char)
+        if not name or not three_char or key in seen:
             continue
-        seen.add(three_char)
+        seen.add(key)
         deposit_objects.append(ReferenceDeposit(
             name=name,
             three_char_code=three_char,
