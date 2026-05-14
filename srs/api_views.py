@@ -2,21 +2,25 @@ import hashlib
 
 from django.db import transaction
 from django.utils import timezone
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.types import OpenApiTypes
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from .importers import run_import, run_dataset_import
 
 from math import ceil
 
 
-from .models import ReferenceImport, Dataset, Sample, SampleMeasurement
+from .models import ReferenceImport, Dataset, Sample, SampleMeasurement, ReferenceSample
 from .serializers import (
     ReferenceImportSerializer,
     ReferenceImportUploadSerializer,
     DatasetSerializer,
-    DatasetUploadSerializer
+    DatasetUploadSerializer,
+    ReferenceLibrarySearchResultSerializer
 )
 
 def _sha256_of(uploaded_file) -> str:
@@ -257,3 +261,84 @@ class DatasetViewSet(viewsets.ModelViewSet):
             return f"{symbol}_{measurement.unit}"
 
         return symbol
+
+
+# Reference Library Search query APIView
+@extend_schema(
+    parameters=[
+        OpenApiParameter("deposit_name",      OpenApiTypes.STR,   description="Partial deposit name match. e.g. Olympic"),
+        OpenApiParameter("deposit_type",      OpenApiTypes.STR,   description="Exact deposit type. e.g. IOCG, Epithermal, Carlin Au, Granite Related"),
+        OpenApiParameter("mineral_system",    OpenApiTypes.STR,   description="Exact mineral system. e.g. Orogenic Au, High Sulphidation Epithermal, Greisen"),
+        OpenApiParameter("country",           OpenApiTypes.STR,   description="Partial country name match. e.g. Australia"),
+        OpenApiParameter("state_region",      OpenApiTypes.STR,   description="Partial state or region match. e.g. Queensland"),
+        OpenApiParameter("sample_code",       OpenApiTypes.STR,   description="Partial sample code match. e.g. 700001"),
+        OpenApiParameter("sample_type",       OpenApiTypes.STR,   description="Exact sample type. e.g. VHMS, Epithermal, Skarn / Skarn Au, Porphyry / Porphyry Cu"),
+        OpenApiParameter("ore_minerals",      OpenApiTypes.STR,   description="Comma-separated ore minerals (AND logic — sample must contain all). e.g. Pyrite,Chalcopyrite"),
+        OpenApiParameter("element",           OpenApiTypes.STR,   description="Element symbol to filter measurements against. e.g. Au, Ag, Cu, Zn"),
+        OpenApiParameter("min_value",         OpenApiTypes.FLOAT, description="Minimum measurement value for the specified element. e.g. 1.0"),
+        OpenApiParameter("max_value",         OpenApiTypes.FLOAT, description="Maximum measurement value for the specified element. e.g. 10.0"),
+        OpenApiParameter("analytical_method", OpenApiTypes.STR,   description="Analytical method used for measurement. e.g. FA (fire assay), AR (aqua regia)"),
+        OpenApiParameter("exclude_bdl",       OpenApiTypes.BOOL,  description="Set true to exclude below-detection-limit measurements from element filtering"),
+        OpenApiParameter("limit",             OpenApiTypes.INT,   description="Number of results to return. Default 25, max 500"),
+        OpenApiParameter("offset",            OpenApiTypes.INT,   description="Number of results to skip for pagination. Default 0"),
+    ],
+)
+class ReferenceLibrarySearchView(APIView):
+    def get(self, request):
+        qs = ReferenceSample.objects.select_related("reference_deposit").prefetch_related("measurements__element")
+
+        p = request.query_params
+
+        # Deposit-level filters
+        if deposit_name := p.get("deposit_name"):
+            qs = qs.filter(reference_deposit__name__icontains=deposit_name)
+        if deposit_type := p.get("deposit_type"):
+            qs = qs.filter(reference_deposit__deposit_type__iexact=deposit_type)
+        if mineral_system := p.get("mineral_system"):
+            qs = qs.filter(reference_deposit__mineral_system__iexact=mineral_system)
+        if country := p.get("country"):
+            qs = qs.filter(reference_deposit__country__icontains=country)
+        if state_region := p.get("state_region"):
+            qs = qs.filter(reference_deposit__state_region__icontains=state_region)
+
+        # Sample-level filters
+        if sample_code := p.get("sample_code"):
+            qs = qs.filter(sample_code__icontains=sample_code)
+        if sample_type := p.get("sample_type"):
+            qs = qs.filter(sample_type__iexact=sample_type)
+        if ore_minerals := p.get("ore_minerals"):
+            for mineral in ore_minerals.split(","):
+                # JSON array element search — __contains is PostgreSQL-only,
+                # so search the serialised JSON text for the quoted string instead.
+                qs = qs.filter(metadata__icontains=f'"{mineral.strip()}"')
+
+        # Measurement-level filters
+        if element := p.get("element"):
+            f = {"measurements__element__symbol__iexact": element}
+            if min_val := p.get("min_value"):
+                f["measurements__value__gte"] = float(min_val)
+            if max_val := p.get("max_value"):
+                f["measurements__value__lte"] = float(max_val)
+            if method := p.get("analytical_method"):
+                f["measurements__analytical_method__iexact"] = method
+            if p.get("exclude_bdl", "").lower() == "true":
+                f["measurements__below_detection_limit"] = False
+            qs = qs.filter(**f)
+
+        qs = qs.distinct()
+
+        try:
+            limit  = max(1, min(int(p.get("limit", 25)), 500))
+            offset = max(0, int(p.get("offset", 0)))
+        except ValueError:
+            return Response({"error": "limit and offset must be integers."}, status=400)
+
+        total = qs.count()
+        samples = qs[offset : offset + limit]
+
+        return Response({
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "results": ReferenceLibrarySearchResultSerializer(samples, many=True).data
+        })

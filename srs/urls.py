@@ -1,7 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from .api_views import ReferenceImportViewSet, DatasetViewSet
+from .api_views import ReferenceImportViewSet, DatasetViewSet, ReferenceLibrarySearchView
 from .views import (
     AnalysisRunViewSet,
     DepositClassificationViewSet,
@@ -24,6 +24,7 @@ router.register("reference-deposits", ReferenceDepositViewSet)
 router.register("reference-samples", ReferenceSampleViewSet)
 router.register("reference-sample-measurements", ReferenceSampleMeasurementViewSet)
 router.register("elements", ElementViewSet)
+
 # Pre-existing
 router.register("datasets", DatasetViewSet)
 router.register("samples", SampleViewSet)
@@ -33,4 +34,5 @@ router.register("similarity-results", SimilarityResultViewSet)
 
 urlpatterns = [
     path("", include(router.urls)),
+    path("reference-library/search/", ReferenceLibrarySearchView.as_view()),
 ]
