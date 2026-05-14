@@ -35,6 +35,7 @@ class ReferenceImportViewSet(viewsets.ModelViewSet):
 
     queryset = ReferenceImport.objects.all().order_by("-created_at")
     parser_classes = (MultiPartParser, FormParser)
+    http_method_names = ["get", "post", "delete", "head", "options"]
 
     def get_serializer_class(self):
         if self.action == "create":
