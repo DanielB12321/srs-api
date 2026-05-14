@@ -344,3 +344,25 @@ class ReferenceLibrarySearchView(APIView):
             "offset": offset,
             "results": ReferenceLibrarySearchResultSerializer(samples, many=True).data
         })
+    
+class SampleLocationsView(APIView):
+    def get(self, request):
+        samples = (
+            ReferenceSample.objects
+            .exclude(latitude__isnull=True)
+            .exclude(longitude__isnull=True)
+            .select_related("reference_deposit")
+            .order_by("sample_code")
+        )
+
+        data = []
+
+        for sample in samples:
+            data.append({
+                "id": sample.id,
+                "sample_id": sample.sample_code,
+                "latitude": sample.latitude,
+                "longitude": sample.longitude,
+            })
+
+        return Response(data)

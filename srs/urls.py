@@ -1,7 +1,12 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from .api_views import ReferenceImportViewSet, DatasetViewSet, ReferenceLibrarySearchView
+from .api_views import (
+    ReferenceImportViewSet,
+    DatasetViewSet,
+    ReferenceLibrarySearchView,
+    SampleLocationsView,
+)
 from .views import (
     AnalysisRunViewSet,
     DepositClassificationViewSet,
@@ -35,4 +40,5 @@ router.register("similarity-results", SimilarityResultViewSet)
 urlpatterns = [
     path("", include(router.urls)),
     path("reference-library/search/", ReferenceLibrarySearchView.as_view()),
+    path("sample-locations/", SampleLocationsView.as_view()),
 ]
