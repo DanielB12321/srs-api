@@ -446,6 +446,8 @@ class FullAnalysisListCreateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        top_n = max(1, min(top_n, 50))
+
         with transaction.atomic():
             full_analysis = FullAnalysis.objects.create(
                 name=sample_name,
