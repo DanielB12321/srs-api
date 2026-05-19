@@ -6,6 +6,8 @@ from .api_views import (
     DatasetViewSet,
     ReferenceLibrarySearchView,
     SampleLocationsView,
+    FullAnalysisListCreateView,
+    FullAnalysisResultView,
 )
 from .views import (
     AnalysisRunViewSet,
@@ -41,4 +43,7 @@ urlpatterns = [
     path("", include(router.urls)),
     path("reference-library/search/", ReferenceLibrarySearchView.as_view()),
     path("sample-locations/", SampleLocationsView.as_view()),
+
+    path("full-analysis/", FullAnalysisListCreateView.as_view()),
+    path("full-analysis/<int:full_analysis_id>/", FullAnalysisResultView.as_view()),
 ]

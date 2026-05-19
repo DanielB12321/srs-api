@@ -413,3 +413,132 @@ class SimilarityResult(models.Model):
 
     def __str__(self):
         return f"{self.analysis_run} - {self.similarity_score}"
+
+        class FullAnalysis(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_RUNNING = "running"
+    STATUS_COMPLETED = "completed"
+    STATUS_FAILED = "failed"
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_RUNNING, "Running"),
+        (STATUS_COMPLETED, "Completed"),
+        (STATUS_FAILED, "Failed"),
+    ]
+
+    name = models.CharField(max_length=255, blank=True)
+    uploaded_sample_code = models.CharField(max_length=100, blank=True)
+    source_filename = models.CharField(max_length=255, blank=True)
+
+    method = models.CharField(max_length=100, default="log_difference_similarity")
+    parameters = models.JSONField(default=dict, blank=True)
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_COMPLETED,
+    )
+
+    created_by_id = models.IntegerField(null=True, blank=True)
+    created_by_email = models.EmailField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.name or f"Full analysis {self.id}"
+
+class FullAnalysis(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_RUNNING = "running"
+    STATUS_COMPLETED = "completed"
+    STATUS_FAILED = "failed"
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_RUNNING, "Running"),
+        (STATUS_COMPLETED, "Completed"),
+        (STATUS_FAILED, "Failed"),
+    ]
+
+    name = models.CharField(max_length=255, blank=True)
+    uploaded_sample_code = models.CharField(max_length=100, blank=True)
+    source_filename = models.CharField(max_length=255, blank=True)
+
+    method = models.CharField(max_length=100, default="log_difference_similarity")
+    parameters = models.JSONField(default=dict, blank=True)
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_COMPLETED,
+    )
+
+    created_by_id = models.IntegerField(null=True, blank=True)
+    created_by_email = models.EmailField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.name or f"Full analysis {self.id}"
+
+
+class FullAnalysisInputMeasurement(models.Model):
+    full_analysis = models.ForeignKey(
+        FullAnalysis,
+        on_delete=models.CASCADE,
+        related_name="input_measurements",
+    )
+    element = models.ForeignKey(
+        Element,
+        on_delete=models.CASCADE,
+        related_name="full_analysis_input_measurements",
+    )
+    value = models.FloatField(null=True, blank=True)
+    unit = models.CharField(max_length=50, blank=True, default="ppm")
+    below_detection_limit = models.BooleanField(default=False)
+    detection_limit = models.FloatField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ("full_analysis", "element")
+        ordering = ["element__symbol"]
+
+    def __str__(self):
+        return f"{self.full_analysis} - {self.element}: {self.value}"
+
+
+class FullAnalysisMatch(models.Model):
+    full_analysis = models.ForeignKey(
+        FullAnalysis,
+        on_delete=models.CASCADE,
+        related_name="ranked_matches",
+    )
+    reference_sample = models.ForeignKey(
+        ReferenceSample,
+        on_delete=models.SET_NULL,
+        related_name="full_analysis_matches",
+        null=True,
+        blank=True,
+    )
+
+    rank = models.PositiveIntegerField()
+    similarity_score = models.FloatField()
+    elements_used = models.JSONField(default=list, blank=True)
+    explanation = models.JSONField(default=dict, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["rank", "-similarity_score"]
+        unique_together = ("full_analysis", "rank")
+
+    def __str__(self):
+        return f"{self.full_analysis} - Rank {self.rank}: {self.similarity_score}"

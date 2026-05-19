@@ -1,3 +1,10 @@
+from math import ceil, log10
+from django.db import transaction
+from django.utils import timezone
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+
 import hashlib
 import threading
 
@@ -15,13 +22,30 @@ from .importers import run_import, run_dataset_import
 from math import ceil
 
 
-from .models import ReferenceImport, Dataset, Sample, SampleMeasurement, ReferenceSample
+from .models import (
+    ReferenceImport,
+    Dataset,
+    Sample,
+    SampleMeasurement,
+    ReferenceSample,
+    ReferenceSampleMeasurement,
+    Element,
+    FullAnalysis,
+    FullAnalysisInputMeasurement,
+    FullAnalysisMatch,
+)
 from .serializers import (
+    AnalysisRunSerializer,
+    SimilarityResultSerializer,
+    SampleSerializer,
+    SampleMeasurementSerializer,
+    ReferenceSampleSerializer,
+    ReferenceSampleMeasurementSerializer,
     ReferenceImportSerializer,
     ReferenceImportUploadSerializer,
     DatasetSerializer,
     DatasetUploadSerializer,
-    ReferenceLibrarySearchResultSerializer
+    ReferenceLibrarySearchResultSerializer,
 )
 
 def _sha256_of(uploaded_file) -> str:
@@ -366,3 +390,358 @@ class SampleLocationsView(APIView):
             })
 
         return Response(data)
+
+
+
+class FullAnalysisListCreateView(APIView):
+    """
+    GET  /api/full-analysis/
+    POST /api/full-analysis/
+
+    This is separate from the old AnalysisRun and SimilarityResult system.
+    """
+
+    def normalise_element_symbol(self, symbol):
+        symbol = str(symbol or "").strip()
+
+        if not symbol:
+            return ""
+
+        return symbol[0].upper() + symbol[1:].lower()
+
+    def serialize_full_analysis_summary(self, full_analysis):
+        return {
+            "id": full_analysis.id,
+            "name": full_analysis.name,
+            "uploaded_sample_code": full_analysis.uploaded_sample_code,
+            "source_filename": full_analysis.source_filename,
+            "method": full_analysis.method,
+            "status": full_analysis.status,
+            "created_at": full_analysis.created_at,
+            "completed_at": full_analysis.completed_at,
+            "match_count": full_analysis.ranked_matches.count(),
+        }
+
+    def get(self, request):
+        full_analyses = FullAnalysis.objects.all().order_by("-created_at")
+
+        return Response({
+            "count": full_analyses.count(),
+            "results": [
+                self.serialize_full_analysis_summary(full_analysis)
+                for full_analysis in full_analyses
+            ],
+        })
+
+    def post(self, request):
+        sample_name = request.data.get("sample_name") or request.data.get("name") or "Uploaded sample"
+        uploaded_sample_code = request.data.get("sample_code") or sample_name
+        source_filename = request.data.get("source_filename", "")
+        measurements = request.data.get("measurements", [])
+        top_n = int(request.data.get("top_n", 10))
+
+        if not isinstance(measurements, list) or len(measurements) == 0:
+            return Response(
+                {"error": "You must provide a non-empty measurements list."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        top_n = max(1, min(top_n, 50))
+
+        with transaction.atomic():
+            full_analysis = FullAnalysis.objects.create(
+                name=sample_name,
+                uploaded_sample_code=uploaded_sample_code,
+                source_filename=source_filename,
+                method="log_difference_similarity",
+                parameters={
+                    "top_n": top_n,
+                    "note": "Temporary similarity method using common element log difference.",
+                },
+                status=FullAnalysis.STATUS_RUNNING,
+            )
+
+            created_measurements = []
+
+            for item in measurements:
+                element_symbol = self.normalise_element_symbol(
+                    item.get("element_symbol") or item.get("symbol")
+                )
+
+                if not element_symbol:
+                    continue
+
+                value = item.get("value", None)
+
+                if value in ["", None]:
+                    numeric_value = None
+                else:
+                    try:
+                        numeric_value = float(value)
+                    except (TypeError, ValueError):
+                        numeric_value = None
+
+                element, created = Element.objects.get_or_create(
+                    symbol=element_symbol,
+                    defaults={"name": element_symbol},
+                )
+
+                measurement, created = FullAnalysisInputMeasurement.objects.update_or_create(
+                    full_analysis=full_analysis,
+                    element=element,
+                    defaults={
+                        "value": numeric_value,
+                        "unit": item.get("unit", "ppm"),
+                        "below_detection_limit": bool(item.get("below_detection_limit", False)),
+                        "detection_limit": item.get("detection_limit", None),
+                    },
+                )
+
+                created_measurements.append(measurement)
+
+            if len(created_measurements) == 0:
+                full_analysis.status = FullAnalysis.STATUS_FAILED
+                full_analysis.completed_at = timezone.now()
+                full_analysis.save()
+
+                return Response(
+                    {"error": "No valid measurements were provided."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            ranked_matches = self.create_ranked_matches(full_analysis, top_n)
+
+            full_analysis.status = FullAnalysis.STATUS_COMPLETED
+            full_analysis.completed_at = timezone.now()
+            full_analysis.save()
+
+        return Response(
+            {
+                "message": "Full analysis created.",
+                "full_analysis_id": full_analysis.id,
+                "ranked_match_count": len(ranked_matches),
+                "results_url": f"/api/full-analysis/{full_analysis.id}/",
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    def create_ranked_matches(self, full_analysis, top_n):
+        input_measurements = (
+            full_analysis.input_measurements
+            .filter(value__isnull=False, below_detection_limit=False)
+            .select_related("element")
+        )
+
+        input_values = {
+            measurement.element.symbol: measurement.value
+            for measurement in input_measurements
+            if measurement.value is not None and measurement.value > 0
+        }
+
+        scored_samples = []
+
+        reference_samples = (
+            ReferenceSample.objects
+            .select_related("reference_deposit")
+            .prefetch_related("measurements__element")
+            .all()
+        )
+
+        for reference_sample in reference_samples:
+            reference_values = {}
+
+            for measurement in reference_sample.measurements.all():
+                if (
+                    measurement.value is not None
+                    and measurement.value > 0
+                    and not measurement.below_detection_limit
+                ):
+                    reference_values[measurement.element.symbol] = measurement.value
+
+            common_elements = sorted(set(input_values.keys()) & set(reference_values.keys()))
+
+            if not common_elements:
+                continue
+
+            score = self.calculate_similarity_score(
+                input_values,
+                reference_values,
+                common_elements,
+            )
+
+            scored_samples.append({
+                "reference_sample": reference_sample,
+                "similarity_score": score,
+                "elements_used": common_elements,
+            })
+
+        scored_samples.sort(key=lambda item: item["similarity_score"], reverse=True)
+
+        created_matches = []
+
+        for rank, item in enumerate(scored_samples[:top_n], start=1):
+            match = FullAnalysisMatch.objects.create(
+                full_analysis=full_analysis,
+                reference_sample=item["reference_sample"],
+                rank=rank,
+                similarity_score=item["similarity_score"],
+                elements_used=item["elements_used"],
+                explanation={
+                    "method": "Average per-element log difference similarity.",
+                    "elements_used_count": len(item["elements_used"]),
+                    "elements_used": item["elements_used"],
+                },
+            )
+
+            created_matches.append(match)
+
+        return created_matches
+
+    def calculate_similarity_score(self, input_values, reference_values, common_elements):
+        element_scores = []
+
+        for element_symbol in common_elements:
+            input_value = input_values[element_symbol]
+            reference_value = reference_values[element_symbol]
+
+            if input_value <= 0 or reference_value <= 0:
+                continue
+
+            log_difference = abs(log10(input_value) - log10(reference_value))
+            element_score = 1 / (1 + log_difference)
+
+            element_scores.append(element_score)
+
+        if not element_scores:
+            return 0
+
+        return sum(element_scores) / len(element_scores)
+
+
+class FullAnalysisResultView(APIView):
+    """
+    GET /api/full-analysis/<full_analysis_id>/
+
+    Returns one saved full analysis result for the results page.
+    """
+
+    def serialize_input_measurement(self, measurement):
+        return {
+            "element_symbol": measurement.element.symbol,
+            "value": measurement.value,
+            "unit": measurement.unit,
+            "below_detection_limit": measurement.below_detection_limit,
+            "detection_limit": measurement.detection_limit,
+        }
+
+    def serialize_reference_measurement(self, measurement):
+        return {
+            "element_symbol": measurement.element.symbol,
+            "value": measurement.value,
+            "unit": measurement.unit,
+            "analytical_method": measurement.analytical_method,
+            "below_detection_limit": measurement.below_detection_limit,
+            "detection_limit": measurement.detection_limit,
+        }
+
+    def serialize_reference_sample(self, reference_sample):
+        if reference_sample is None:
+            return None
+
+        deposit = reference_sample.reference_deposit
+
+        latitude = reference_sample.latitude
+        longitude = reference_sample.longitude
+
+        if latitude is None and deposit is not None:
+            latitude = deposit.latitude
+
+        if longitude is None and deposit is not None:
+            longitude = deposit.longitude
+
+        return {
+            "id": reference_sample.id,
+            "sample_code": reference_sample.sample_code,
+            "sample_type": reference_sample.sample_type,
+            "latitude": latitude,
+            "longitude": longitude,
+            "source_dataset": reference_sample.source_dataset,
+            "source_reference": reference_sample.source_reference,
+            "metadata": reference_sample.metadata,
+
+            "deposit": {
+                "id": deposit.id if deposit else None,
+                "name": deposit.name if deposit else None,
+                "deposit_type": deposit.deposit_type if deposit else None,
+                "mineral_system": deposit.mineral_system if deposit else None,
+                "country": deposit.country if deposit else None,
+                "state_region": deposit.state_region if deposit else None,
+                "description": deposit.description if deposit else None,
+            } if deposit else None,
+
+            "deposit_name": deposit.name if deposit else None,
+            "deposit_type": deposit.deposit_type if deposit else None,
+            "mineral_system": deposit.mineral_system if deposit else None,
+            "country": deposit.country if deposit else None,
+
+            "measurements": [
+                self.serialize_reference_measurement(measurement)
+                for measurement in reference_sample.measurements.select_related("element").all()
+            ],
+        }
+
+    def get(self, request, full_analysis_id):
+        try:
+            full_analysis = FullAnalysis.objects.get(id=full_analysis_id)
+        except FullAnalysis.DoesNotExist:
+            return Response(
+                {"error": f"Full analysis {full_analysis_id} was not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        input_measurements = (
+            full_analysis.input_measurements
+            .select_related("element")
+            .all()
+        )
+
+        ranked_matches = (
+            full_analysis.ranked_matches
+            .select_related("reference_sample", "reference_sample__reference_deposit")
+            .prefetch_related("reference_sample__measurements__element")
+            .all()
+        )
+
+        return Response({
+            "full_analysis_id": full_analysis.id,
+            "full_analysis": {
+                "id": full_analysis.id,
+                "name": full_analysis.name,
+                "uploaded_sample_code": full_analysis.uploaded_sample_code,
+                "source_filename": full_analysis.source_filename,
+                "method": full_analysis.method,
+                "parameters": full_analysis.parameters,
+                "status": full_analysis.status,
+                "created_at": full_analysis.created_at,
+                "completed_at": full_analysis.completed_at,
+            },
+            "analysed_sample": {
+                "sample_code": full_analysis.uploaded_sample_code,
+                "name": full_analysis.name,
+                "measurements": [
+                    self.serialize_input_measurement(measurement)
+                    for measurement in input_measurements
+                ],
+            },
+            "ranked_matches": [
+                {
+                    "id": match.id,
+                    "rank": match.rank,
+                    "similarity_score": match.similarity_score,
+                    "elements_used": match.elements_used,
+                    "explanation": match.explanation,
+                    "reference_sample": self.serialize_reference_sample(match.reference_sample),
+                }
+                for match in ranked_matches
+            ],
+        })
