@@ -399,9 +399,17 @@ class FullAnalysisListCreateView(APIView):
     POST /api/full-analysis/
 
     This is separate from the old AnalysisRun and SimilarityResult system.
+
+    A POST request performs the complete workflow synchronously:
+    1. Save the uploaded/test sample and its measurements.
+    2. Compare it with every reference sample.
+    3. Save the highest-scoring reference sample IDs.
+
+    A GET request returns summaries of previously saved analyses.
     """
 
     def normalise_element_symbol(self, symbol):
+        """Return a consistently capitalised symbol, for example 'CU' -> 'Cu'."""
         symbol = str(symbol or "").strip()
 
         if not symbol:
@@ -434,20 +442,25 @@ class FullAnalysisListCreateView(APIView):
         })
 
     def post(self, request):
+        # Older clients send "name", while the upload page sends "sample_name".
         sample_name = request.data.get("sample_name") or request.data.get("name") or "Uploaded sample"
         uploaded_sample_code = request.data.get("sample_code") or sample_name
         source_filename = request.data.get("source_filename", "")
         measurements = request.data.get("measurements", [])
         top_n = int(request.data.get("top_n", 10))
 
+        # An analysis without submitted measurements cannot be compared.
         if not isinstance(measurements, list) or len(measurements) == 0:
             return Response(
                 {"error": "You must provide a non-empty measurements list."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Protect the API from accidentally receiving a huge requested result set.
         top_n = max(1, min(top_n, 50))
 
+        # These records form one result. If an exception occurs, atomic() rolls
+        # everything back rather than leaving a partially saved analysis.
         with transaction.atomic():
             full_analysis = FullAnalysis.objects.create(
                 name=sample_name,
@@ -464,6 +477,8 @@ class FullAnalysisListCreateView(APIView):
             created_measurements = []
 
             for item in measurements:
+                # Symbols become dictionary keys later, so cu, Cu, and CU must
+                # all resolve to the same database Element.
                 element_symbol = self.normalise_element_symbol(
                     item.get("element_symbol") or item.get("symbol")
                 )
@@ -473,6 +488,8 @@ class FullAnalysisListCreateView(APIView):
 
                 value = item.get("value", None)
 
+                # Preserve rows with missing/invalid values as null. They remain
+                # part of the test sample but do not participate in comparison.
                 if value in ["", None]:
                     numeric_value = None
                 else:
@@ -486,6 +503,8 @@ class FullAnalysisListCreateView(APIView):
                     defaults={"name": element_symbol},
                 )
 
+                # Only one value is stored per element. For repeated elements in
+                # the request, the last submitted value wins.
                 measurement, created = FullAnalysisInputMeasurement.objects.update_or_create(
                     full_analysis=full_analysis,
                     element=element,
@@ -500,6 +519,7 @@ class FullAnalysisListCreateView(APIView):
                 created_measurements.append(measurement)
 
             if len(created_measurements) == 0:
+                # Every submitted row lacked an element symbol.
                 full_analysis.status = FullAnalysis.STATUS_FAILED
                 full_analysis.completed_at = timezone.now()
                 full_analysis.save()
@@ -509,6 +529,7 @@ class FullAnalysisListCreateView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+            # This runs synchronously; status stays "running" until it finishes.
             ranked_matches = self.create_ranked_matches(full_analysis, top_n)
 
             full_analysis.status = FullAnalysis.STATUS_COMPLETED
@@ -526,12 +547,22 @@ class FullAnalysisListCreateView(APIView):
         )
 
     def create_ranked_matches(self, full_analysis, top_n):
+        """
+        Compare one saved test sample with the reference library.
+
+        Only the reference sample ID, rank, and final score are persisted for a
+        match. Descriptive reference data stays in the reference library and is
+        requested separately when the results page needs it.
+        """
+        # Logarithms require positive values. Below-detection-limit readings are
+        # excluded because they are not exact measured concentrations.
         input_measurements = (
             full_analysis.input_measurements
             .filter(value__isnull=False, below_detection_limit=False)
             .select_related("element")
         )
 
+        # A symbol-to-value dictionary makes finding shared elements inexpensive.
         input_values = {
             measurement.element.symbol: measurement.value
             for measurement in input_measurements
@@ -540,6 +571,7 @@ class FullAnalysisListCreateView(APIView):
 
         scored_samples = []
 
+        # Prefetch measurements to avoid a new database query for every sample.
         reference_samples = (
             ReferenceSample.objects
             .select_related("reference_deposit")
@@ -558,6 +590,7 @@ class FullAnalysisListCreateView(APIView):
                 ):
                     reference_values[measurement.element.symbol] = measurement.value
 
+            # Compare only elements with usable readings in both samples.
             common_elements = sorted(set(input_values.keys()) & set(reference_values.keys()))
 
             if not common_elements:
@@ -575,6 +608,7 @@ class FullAnalysisListCreateView(APIView):
                 "elements_used": common_elements,
             })
 
+        # Higher similarity is better, so the first saved result receives rank 1.
         scored_samples.sort(key=lambda item: item["similarity_score"], reverse=True)
 
         created_matches = []
@@ -592,6 +626,13 @@ class FullAnalysisListCreateView(APIView):
         return created_matches
 
     def calculate_similarity_score(self, input_values, reference_values, common_elements):
+        """
+        Return mean logarithmic similarity across the shared elements.
+
+        Identical concentrations score 1 for an element; a tenfold difference
+        scores 0.5. Logarithms make proportional differences comparable across
+        elements whose concentrations have very different magnitudes.
+        """
         element_scores = []
 
         for element_symbol in common_elements:
@@ -601,6 +642,7 @@ class FullAnalysisListCreateView(APIView):
             if input_value <= 0 or reference_value <= 0:
                 continue
 
+            # This is the absolute difference in orders of magnitude.
             log_difference = abs(log10(input_value) - log10(reference_value))
             element_score = 1 / (1 + log_difference)
 
@@ -617,6 +659,10 @@ class FullAnalysisResultView(APIView):
     GET /api/full-analysis/<full_analysis_id>/
 
     Returns one saved full analysis result for the results page.
+
+    The analysed sample includes all saved input measurements. Ranked matches
+    are deliberately compact: each contains only the reference sample ID, rank,
+    and similarity score. Reference details have their own API endpoints.
     """
 
     def serialize_input_measurement(self, measurement):
@@ -648,6 +694,8 @@ class FullAnalysisResultView(APIView):
             .all()
         )
 
+        # Keep the test sample complete, but do not duplicate reference-library
+        # records inside every saved analysis response.
         return Response({
             "full_analysis_id": full_analysis.id,
             "full_analysis": {
@@ -672,6 +720,8 @@ class FullAnalysisResultView(APIView):
             },
             "ranked_matches": [
                 {
+                    # This is ReferenceSample.id, not FullAnalysisMatch.id. The
+                    # results page uses it to request reference details.
                     "id": match.reference_sample_id,
                     "rank": match.rank,
                     "similarity_score": match.similarity_score,

@@ -416,6 +416,12 @@ class SimilarityResult(models.Model):
 
 
 class FullAnalysis(models.Model):
+    """
+    One complete comparison requested by a user.
+
+    Test-sample measurements and ranked matches are stored in the related
+    FullAnalysisInputMeasurement and FullAnalysisMatch tables.
+    """
     STATUS_PENDING = "pending"
     STATUS_RUNNING = "running"
     STATUS_COMPLETED = "completed"
@@ -455,6 +461,8 @@ class FullAnalysis(models.Model):
 
 
 class FullAnalysisInputMeasurement(models.Model):
+    """One element reading submitted as part of the uploaded/test sample."""
+
     full_analysis = models.ForeignKey(
         FullAnalysis,
         on_delete=models.CASCADE,
@@ -479,6 +487,12 @@ class FullAnalysisInputMeasurement(models.Model):
 
 
 class FullAnalysisMatch(models.Model):
+    """
+    A compact ranked result.
+
+    Full reference-sample data is not copied here. The foreign key stores its ID,
+    while this row stores only the position and calculated similarity score.
+    """
     full_analysis = models.ForeignKey(
         FullAnalysis,
         on_delete=models.CASCADE,
