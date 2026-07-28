@@ -392,6 +392,92 @@ class SampleLocationsView(APIView):
         return Response(data)
 
 
+class BulkReferenceSampleDetailView(APIView):
+    """
+    POST /api/reference-samples/bulk-details/
+
+    Return complete reference data for up to 50 sample IDs in one response.
+    select_related and prefetch_related keep this to a small, fixed number of
+    database queries instead of querying once per ranked match.
+    """
+
+    def post(self, request):
+        requested_ids = request.data.get("ids")
+
+        if not isinstance(requested_ids, list) or not requested_ids:
+            return Response(
+                {"error": "ids must be a non-empty list."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            # dict.fromkeys removes duplicates without changing requested order.
+            sample_ids = list(dict.fromkeys(int(sample_id) for sample_id in requested_ids))
+        except (TypeError, ValueError):
+            return Response(
+                {"error": "Every sample ID must be an integer."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if len(sample_ids) > 50:
+            return Response(
+                {"error": "A maximum of 50 sample IDs can be requested."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        samples = (
+            ReferenceSample.objects
+            .filter(id__in=sample_ids)
+            .select_related("reference_deposit")
+            .prefetch_related("measurements__element")
+        )
+        samples_by_id = {sample.id: sample for sample in samples}
+
+        # Preserve the ranked ID order supplied by the results page.
+        results = [
+            self.serialize_sample(samples_by_id[sample_id])
+            for sample_id in sample_ids
+            if sample_id in samples_by_id
+        ]
+
+        return Response({"results": results})
+
+    def serialize_sample(self, sample):
+        deposit = sample.reference_deposit
+
+        return {
+            "id": sample.id,
+            "sample_code": sample.sample_code,
+            "sample_type": sample.sample_type,
+            "latitude": (
+                sample.latitude
+                if sample.latitude is not None
+                else (deposit.latitude if deposit else None)
+            ),
+            "longitude": (
+                sample.longitude
+                if sample.longitude is not None
+                else (deposit.longitude if deposit else None)
+            ),
+            "source_dataset": sample.source_dataset,
+            "source_reference": sample.source_reference,
+            "metadata": sample.metadata,
+            "deposit_name": deposit.name if deposit else None,
+            "deposit_type": deposit.deposit_type if deposit else None,
+            "measurements": [
+                {
+                    "element_symbol": measurement.element.symbol,
+                    "value": measurement.value,
+                    "unit": measurement.unit,
+                    "analytical_method": measurement.analytical_method,
+                    "below_detection_limit": measurement.below_detection_limit,
+                    "detection_limit": measurement.detection_limit,
+                }
+                for measurement in sample.measurements.all()
+            ],
+        }
+
+
 
 class FullAnalysisListCreateView(APIView):
     """
