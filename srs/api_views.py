@@ -466,6 +466,9 @@ class FullAnalysisListCreateView(APIView):
                 name=sample_name,
                 uploaded_sample_code=uploaded_sample_code,
                 source_filename=source_filename,
+                # Save the complete request as a snapshot of the test sample.
+                # dict() converts DRF's mapping wrapper into JSON-safe data.
+                sample_data=dict(request.data),
                 method="log_difference_similarity",
                 parameters={
                     "top_n": top_n,
@@ -710,6 +713,9 @@ class FullAnalysisResultView(APIView):
                 "completed_at": full_analysis.completed_at,
             },
             "analysed_sample": {
+                # Return the saved snapshot as well as the normalised measurement
+                # records below. This preserves any extra test-sample metadata.
+                **full_analysis.sample_data,
                 "sample_code": full_analysis.uploaded_sample_code,
                 "name": full_analysis.name,
                 "source_filename": full_analysis.source_filename,

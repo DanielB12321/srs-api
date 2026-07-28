@@ -437,6 +437,9 @@ class FullAnalysis(models.Model):
     name = models.CharField(max_length=255, blank=True)
     uploaded_sample_code = models.CharField(max_length=100, blank=True)
     source_filename = models.CharField(max_length=255, blank=True)
+    # Snapshot of the complete submitted test sample. Keeping this on the
+    # analysis means future reads do not depend on the request format changing.
+    sample_data = models.JSONField(default=dict, blank=True)
 
     method = models.CharField(max_length=100, default="log_difference_similarity")
     parameters = models.JSONField(default=dict, blank=True)
