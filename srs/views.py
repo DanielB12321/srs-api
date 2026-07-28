@@ -63,6 +63,13 @@ class ReferenceSampleMeasurementViewSet(viewsets.ModelViewSet):
     queryset = ReferenceSampleMeasurement.objects.all()
     serializer_class = ReferenceSampleMeasurementSerializer
 
+    def get_queryset(self):
+        queryset = super().get_queryset().select_related("element", "reference_sample")
+        reference_sample_id = self.request.query_params.get("reference_sample")
+        if reference_sample_id:
+            queryset = queryset.filter(reference_sample_id=reference_sample_id)
+        return queryset
+
 
 class AnalysisRunViewSet(viewsets.ModelViewSet):
     queryset = AnalysisRun.objects.all().order_by("-created_at")

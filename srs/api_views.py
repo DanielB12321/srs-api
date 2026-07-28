@@ -585,12 +585,6 @@ class FullAnalysisListCreateView(APIView):
                 reference_sample=item["reference_sample"],
                 rank=rank,
                 similarity_score=item["similarity_score"],
-                elements_used=item["elements_used"],
-                explanation={
-                    "method": "Average per-element log difference similarity.",
-                    "elements_used_count": len(item["elements_used"]),
-                    "elements_used": item["elements_used"],
-                },
             )
 
             created_matches.append(match)
@@ -634,62 +628,6 @@ class FullAnalysisResultView(APIView):
             "detection_limit": measurement.detection_limit,
         }
 
-    def serialize_reference_measurement(self, measurement):
-        return {
-            "element_symbol": measurement.element.symbol,
-            "value": measurement.value,
-            "unit": measurement.unit,
-            "analytical_method": measurement.analytical_method,
-            "below_detection_limit": measurement.below_detection_limit,
-            "detection_limit": measurement.detection_limit,
-        }
-
-    def serialize_reference_sample(self, reference_sample):
-        if reference_sample is None:
-            return None
-
-        deposit = reference_sample.reference_deposit
-
-        latitude = reference_sample.latitude
-        longitude = reference_sample.longitude
-
-        if latitude is None and deposit is not None:
-            latitude = deposit.latitude
-
-        if longitude is None and deposit is not None:
-            longitude = deposit.longitude
-
-        return {
-            "id": reference_sample.id,
-            "sample_code": reference_sample.sample_code,
-            "sample_type": reference_sample.sample_type,
-            "latitude": latitude,
-            "longitude": longitude,
-            "source_dataset": reference_sample.source_dataset,
-            "source_reference": reference_sample.source_reference,
-            "metadata": reference_sample.metadata,
-
-            "deposit": {
-                "id": deposit.id if deposit else None,
-                "name": deposit.name if deposit else None,
-                "deposit_type": deposit.deposit_type if deposit else None,
-                "mineral_system": deposit.mineral_system if deposit else None,
-                "country": deposit.country if deposit else None,
-                "state_region": deposit.state_region if deposit else None,
-                "description": deposit.description if deposit else None,
-            } if deposit else None,
-
-            "deposit_name": deposit.name if deposit else None,
-            "deposit_type": deposit.deposit_type if deposit else None,
-            "mineral_system": deposit.mineral_system if deposit else None,
-            "country": deposit.country if deposit else None,
-
-            "measurements": [
-                self.serialize_reference_measurement(measurement)
-                for measurement in reference_sample.measurements.select_related("element").all()
-            ],
-        }
-
     def get(self, request, full_analysis_id):
         try:
             full_analysis = FullAnalysis.objects.get(id=full_analysis_id)
@@ -707,8 +645,6 @@ class FullAnalysisResultView(APIView):
 
         ranked_matches = (
             full_analysis.ranked_matches
-            .select_related("reference_sample", "reference_sample__reference_deposit")
-            .prefetch_related("reference_sample__measurements__element")
             .all()
         )
 
@@ -728,6 +664,7 @@ class FullAnalysisResultView(APIView):
             "analysed_sample": {
                 "sample_code": full_analysis.uploaded_sample_code,
                 "name": full_analysis.name,
+                "source_filename": full_analysis.source_filename,
                 "measurements": [
                     self.serialize_input_measurement(measurement)
                     for measurement in input_measurements
@@ -735,12 +672,9 @@ class FullAnalysisResultView(APIView):
             },
             "ranked_matches": [
                 {
-                    "id": match.id,
+                    "id": match.reference_sample_id,
                     "rank": match.rank,
                     "similarity_score": match.similarity_score,
-                    "elements_used": match.elements_used,
-                    "explanation": match.explanation,
-                    "reference_sample": self.serialize_reference_sample(match.reference_sample),
                 }
                 for match in ranked_matches
             ],

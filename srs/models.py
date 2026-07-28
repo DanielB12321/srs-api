@@ -494,8 +494,6 @@ class FullAnalysisMatch(models.Model):
 
     rank = models.PositiveIntegerField()
     similarity_score = models.FloatField()
-    elements_used = models.JSONField(default=list, blank=True)
-    explanation = models.JSONField(default=dict, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
