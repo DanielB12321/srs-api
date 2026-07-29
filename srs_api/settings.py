@@ -29,10 +29,15 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-fallback-key-change-m
 
 DEBUG = os.environ.get("DEBUG", "False") == "True"
 
-ALLOWED_HOSTS = os.environ.get(
-    "ALLOWED_HOSTS",
-    "127.0.0.1,localhost"
-).split(",")
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.getenv("ALLOWED_HOSTS", "").split(",")
+    if host.strip()
+]
+
+azure_hostname = os.getenv("WEBSITE_HOSTNAME")
+if azure_hostname and azure_hostname not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(azure_hostname)
 
 
 # Application definition
