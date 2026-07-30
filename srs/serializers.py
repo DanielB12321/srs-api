@@ -17,11 +17,9 @@ from .models import (
     ReferenceSample,
     ReferenceSampleMeasurement,
     #Others
-    AnalysisRun,
     Dataset,
     Sample,
     SampleMeasurement,
-    SimilarityResult
 )
  
 #Reference Library Serializers
@@ -163,17 +161,6 @@ class SampleMeasurementSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
-
-class AnalysisRunSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = AnalysisRun
-        fields = "__all__"
-
-
-class SimilarityResultSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = SimilarityResult
-        fields = "__all__"
 
 # Reference Library Search Query Result Serializer
 

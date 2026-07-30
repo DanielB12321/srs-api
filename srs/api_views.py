@@ -37,8 +37,6 @@ from .models import (
     FullAnalysisMatch,
 )
 from .serializers import (
-    AnalysisRunSerializer,
-    SimilarityResultSerializer,
     SampleSerializer,
     SampleMeasurementSerializer,
     ReferenceSampleSerializer,
@@ -463,12 +461,10 @@ class FullAnalysisListCreateView(APIView):
     GET  /api/full-analysis/
     POST /api/full-analysis/
 
-    This is separate from the old AnalysisRun and SimilarityResult system.
-
-    A POST request performs the complete workflow synchronously:
-    1. Save the uploaded/test sample and its measurements.
-    2. Compare it with every reference sample.
-    3. Save the highest-scoring reference sample IDs.
+    A POST request queues the complete workflow:
+    1. Save the uploaded/test samples and analysis configuration.
+    2. Compare each sample with the reference library in background batches.
+    3. Save each sample's final highest-scoring reference IDs.
 
     A GET request returns summaries of previously saved analyses.
     """
@@ -484,6 +480,7 @@ class FullAnalysisListCreateView(APIView):
 
     def serialize_full_analysis_summary(self, full_analysis):
         samples = full_analysis.sample_data.get("samples") or []
+        parameters = full_analysis.parameters or {}
         return {
             "id": full_analysis.id,
             "name": full_analysis.name,
@@ -495,6 +492,14 @@ class FullAnalysisListCreateView(APIView):
             "completed_at": full_analysis.completed_at,
             "match_count": full_analysis.ranked_matches.count(),
             "sample_count": len(samples) or 1,
+            "sample_codes": [
+                sample.get("sample_code")
+                for sample in samples
+                if sample.get("sample_code")
+            ] or [full_analysis.uploaded_sample_code],
+            "selected_elements": parameters.get("selected_elements") or [],
+            "preprocessing": parameters.get("preprocessing") or {},
+            "parameters": parameters,
         }
 
     def get(self, request):

@@ -1,7 +1,6 @@
 from rest_framework import viewsets
 
 from .models import (
-    AnalysisRun,
     Mineral, 
     DepositClassification,
     Dataset,
@@ -11,11 +10,9 @@ from .models import (
     ReferenceSampleMeasurement,
     Sample,
     SampleMeasurement,
-    SimilarityResult
 )
 
 from .serializers import (
-    AnalysisRunSerializer,
     DatasetSerializer,
     ElementSerializer,
     ReferenceDepositSerializer,
@@ -23,7 +20,6 @@ from .serializers import (
     ReferenceSampleSerializer,
     SampleMeasurementSerializer,
     SampleSerializer,
-    SimilarityResultSerializer,
     MineralSerializer,
     DepositClassificationSerializer
 )
@@ -69,16 +65,6 @@ class ReferenceSampleMeasurementViewSet(viewsets.ModelViewSet):
         if reference_sample_id:
             queryset = queryset.filter(reference_sample_id=reference_sample_id)
         return queryset
-
-
-class AnalysisRunViewSet(viewsets.ModelViewSet):
-    queryset = AnalysisRun.objects.all().order_by("-created_at")
-    serializer_class = AnalysisRunSerializer
-
-
-class SimilarityResultViewSet(viewsets.ModelViewSet):
-    queryset = SimilarityResult.objects.all().order_by("rank", "-similarity_score")
-    serializer_class = SimilarityResultSerializer
 
 
 class MineralViewSet(viewsets.ReadOnlyModelViewSet):

@@ -12,7 +12,6 @@ from .api_views import (
     FullAnalysisSampleMapView,
 )
 from .views import (
-    AnalysisRunViewSet,
     DepositClassificationViewSet,
     ElementViewSet,
     MineralViewSet,
@@ -21,7 +20,6 @@ from .views import (
     ReferenceSampleViewSet,
     SampleMeasurementViewSet,
     SampleViewSet,
-    SimilarityResultViewSet,
 )
 
 router = DefaultRouter()
@@ -38,8 +36,6 @@ router.register("elements", ElementViewSet)
 router.register("datasets", DatasetViewSet)
 router.register("samples", SampleViewSet)
 router.register("sample-measurements", SampleMeasurementViewSet)
-router.register("analysis-runs", AnalysisRunViewSet)
-router.register("similarity-results", SimilarityResultViewSet)
 
 urlpatterns = [
     # Keep this before router.urls so "bulk-details" is not interpreted as a
