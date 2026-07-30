@@ -557,8 +557,9 @@ class FullAnalysisListCreateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Protect the API from accidentally receiving a huge requested result set.
-        top_n = max(1, min(top_n, 50))
+        # Keep the value positive, but do not impose an upper limit. Large result
+        # sets are exposed through the paginated per-sample results endpoint.
+        top_n = max(1, top_n)
         first_sample = samples[0]
         sample_snapshot = dict(request.data)
         sample_snapshot["samples"] = samples
