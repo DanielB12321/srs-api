@@ -20,6 +20,7 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from .importers import run_import, run_dataset_import
+from .services.units import concentration_to_ppm
 
 from math import ceil
 
@@ -523,7 +524,7 @@ class FullAnalysisListCreateView(APIView):
         preprocessing = request.data.get("preprocessing") or {}
 
         try:
-            top_n = int(request.data.get("top_n", 10))
+            top_n = int(request.data.get("top_n", 200))
         except (TypeError, ValueError):
             return Response(
                 {"error": "top_n must be an integer."},
@@ -733,11 +734,12 @@ class FullAnalysisListCreateView(APIView):
         for measurement in measurements:
             if measurement.get("below_detection_limit"):
                 continue
-            try:
-                value = float(measurement.get("value"))
-            except (TypeError, ValueError):
-                continue
-            if value > 0:
+
+            value = concentration_to_ppm(
+                measurement.get("value"),
+                measurement.get("unit"),
+            )
+            if value is not None:
                 input_values[measurement["element_symbol"]] = value
 
         # Keep one global bounded heap across every batch. This guarantees the
@@ -762,12 +764,15 @@ class FullAnalysisListCreateView(APIView):
                 reference_values = {}
 
                 for measurement in reference_sample.measurements.all():
-                    if (
-                        measurement.value is not None
-                        and measurement.value > 0
-                        and not measurement.below_detection_limit
-                    ):
-                        reference_values[measurement.element.symbol] = measurement.value
+                    if measurement.below_detection_limit:
+                        continue
+
+                    value = concentration_to_ppm(
+                        measurement.value,
+                        measurement.unit,
+                    )
+                    if value is not None:
+                        reference_values[measurement.element.symbol] = value
 
                 common_elements = set(input_values) & set(reference_values)
                 if not common_elements:
