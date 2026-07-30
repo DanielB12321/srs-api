@@ -511,6 +511,11 @@ class FullAnalysisListCreateView(APIView):
     def post(self, request):
         analysis_name = request.data.get("analysis_name") or request.data.get("name") or "Uploaded analysis"
         source_filename = request.data.get("source_filename", "")
+        similarity_method = (
+            request.data.get("similarity_method")
+            or "log_difference_similarity"
+        )
+        preprocessing = request.data.get("preprocessing") or {}
 
         try:
             top_n = int(request.data.get("top_n", 10))
@@ -570,10 +575,15 @@ class FullAnalysisListCreateView(APIView):
             uploaded_sample_code=first_sample["sample_code"],
             source_filename=source_filename,
             sample_data=sample_snapshot,
-            method="log_difference_similarity",
+            method=similarity_method,
             parameters={
                 "top_n": top_n,
                 "batch_size": 250,
+                "dataset_id": request.data.get("dataset_id"),
+                "dataset_name": request.data.get("dataset_name"),
+                "selected_elements": request.data.get("selected_elements") or [],
+                "preprocessing": preprocessing,
+                "similarity_method": similarity_method,
                 "samples_completed": 0,
                 "sample_count": len(samples),
                 "references_processed": 0,
@@ -612,6 +622,11 @@ class FullAnalysisListCreateView(APIView):
             parameters = dict(full_analysis.parameters)
             top_n = int(parameters["top_n"])
             batch_size = int(parameters.get("batch_size", 250))
+            similarity_method = parameters.get(
+                "similarity_method",
+                "log_difference_similarity",
+            )
+            preprocessing = parameters.get("preprocessing") or {}
 
             full_analysis.status = FullAnalysis.STATUS_RUNNING
             full_analysis.save(update_fields=["status"])
@@ -623,6 +638,8 @@ class FullAnalysisListCreateView(APIView):
                     sample_index,
                     top_n,
                     batch_size,
+                    similarity_method,
+                    preprocessing,
                 )
                 parameters["samples_completed"] = sample_index + 1
                 parameters["references_processed"] = parameters["reference_count"]
@@ -694,6 +711,8 @@ class FullAnalysisListCreateView(APIView):
         sample_index,
         top_n,
         batch_size,
+        similarity_method,
+        preprocessing,
     ):
         """
         Compare one saved test sample with the reference library.
@@ -753,6 +772,8 @@ class FullAnalysisListCreateView(APIView):
                     input_values,
                     reference_values,
                     common_elements,
+                    similarity_method,
+                    preprocessing,
                 )
                 candidate = (score, reference_sample.id)
 
@@ -796,7 +817,14 @@ class FullAnalysisListCreateView(APIView):
 
         return created_matches
 
-    def calculate_similarity_score(self, input_values, reference_values, common_elements):
+    def calculate_similarity_score(
+        self,
+        input_values,
+        reference_values,
+        common_elements,
+        similarity_method="log_difference_similarity",
+        preprocessing=None,
+    ):
         """
         Return mean logarithmic similarity across the shared elements.
 
@@ -804,24 +832,68 @@ class FullAnalysisListCreateView(APIView):
         scores 0.5. Logarithms make proportional differences comparable across
         elements whose concentrations have very different magnitudes.
         """
-        element_scores = []
+        preprocessing = preprocessing or {}
+        symbols = sorted(common_elements)
+        input_vector = [input_values[symbol] for symbol in symbols]
+        reference_vector = [reference_values[symbol] for symbol in symbols]
 
-        for element_symbol in common_elements:
-            input_value = input_values[element_symbol]
-            reference_value = reference_values[element_symbol]
-
-            if input_value <= 0 or reference_value <= 0:
-                continue
-
-            # This is the absolute difference in orders of magnitude.
-            log_difference = abs(log10(input_value) - log10(reference_value))
-            element_score = 1 / (1 + log_difference)
-
-            element_scores.append(element_score)
-
-        if not element_scores:
+        if not input_vector:
             return 0
 
+        # CLR normalisation includes a log transform and centres each sample
+        # around its geometric mean. Missing values are already handled by using
+        # only the elements shared by the tested and reference samples.
+        if preprocessing.get("normalise"):
+            input_logs = [log10(value) for value in input_vector]
+            reference_logs = [log10(value) for value in reference_vector]
+            input_mean = sum(input_logs) / len(input_logs)
+            reference_mean = sum(reference_logs) / len(reference_logs)
+            input_vector = [value - input_mean for value in input_logs]
+            reference_vector = [value - reference_mean for value in reference_logs]
+        elif preprocessing.get("log_transform"):
+            input_vector = [log10(value) for value in input_vector]
+            reference_vector = [log10(value) for value in reference_vector]
+
+        if similarity_method == "correlation" and len(input_vector) >= 2:
+            input_mean = sum(input_vector) / len(input_vector)
+            reference_mean = sum(reference_vector) / len(reference_vector)
+            input_centred = [value - input_mean for value in input_vector]
+            reference_centred = [value - reference_mean for value in reference_vector]
+            numerator = sum(
+                left * right
+                for left, right in zip(input_centred, reference_centred)
+            )
+            denominator = (
+                sum(value * value for value in input_centred)
+                * sum(value * value for value in reference_centred)
+            ) ** 0.5
+            return (1 + numerator / denominator) / 2 if denominator else 0
+
+        if similarity_method == "association":
+            numerator = sum(
+                left * right
+                for left, right in zip(input_vector, reference_vector)
+            )
+            denominator = (
+                sum(value * value for value in input_vector)
+                * sum(value * value for value in reference_vector)
+            ) ** 0.5
+            cosine = numerator / denominator if denominator else 0
+            return max(0, min(1, (cosine + 1) / 2))
+
+        if similarity_method == "distance":
+            element_scores = [
+                1 / (1 + abs(left - right))
+                for left, right in zip(input_vector, reference_vector)
+            ]
+            return sum(element_scores) / len(element_scores)
+
+        # The legacy method retains the original logarithmic difference score so
+        # API clients that omit a method remain backwards compatible.
+        element_scores = [
+            1 / (1 + abs(log10(input_values[symbol]) - log10(reference_values[symbol])))
+            for symbol in symbols
+        ]
         return sum(element_scores) / len(element_scores)
 
 
