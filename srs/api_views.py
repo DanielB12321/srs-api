@@ -638,6 +638,13 @@ class FullAnalysisListCreateView(APIView):
             full_analysis.save(update_fields=["status"])
 
             for sample_index, sample in enumerate(samples):
+                parameters.update({
+                    "current_sample_index": sample_index,
+                    "references_processed": 0,
+                })
+                full_analysis.parameters = parameters
+                full_analysis.save(update_fields=["parameters"])
+
                 self.create_ranked_matches(
                     full_analysis,
                     sample["measurements"],
