@@ -509,6 +509,9 @@ class FullAnalysisMatch(models.Model):
         blank=True,
     )
 
+    # Zero-based position of the tested sample inside FullAnalysis.sample_data.
+    # This lets one uploaded CSV analysis own a separate ranking per input row.
+    analysed_sample_index = models.PositiveIntegerField(default=0)
     rank = models.PositiveIntegerField()
     similarity_score = models.FloatField()
 
@@ -516,7 +519,7 @@ class FullAnalysisMatch(models.Model):
 
     class Meta:
         ordering = ["rank", "-similarity_score"]
-        unique_together = ("full_analysis", "rank")
+        unique_together = ("full_analysis", "analysed_sample_index", "rank")
 
     def __str__(self):
         return f"{self.full_analysis} - Rank {self.rank}: {self.similarity_score}"

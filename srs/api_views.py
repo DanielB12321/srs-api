@@ -481,6 +481,7 @@ class FullAnalysisListCreateView(APIView):
         return symbol[0].upper() + symbol[1:].lower()
 
     def serialize_full_analysis_summary(self, full_analysis):
+        samples = full_analysis.sample_data.get("samples") or []
         return {
             "id": full_analysis.id,
             "name": full_analysis.name,
@@ -491,6 +492,7 @@ class FullAnalysisListCreateView(APIView):
             "created_at": full_analysis.created_at,
             "completed_at": full_analysis.completed_at,
             "match_count": full_analysis.ranked_matches.count(),
+            "sample_count": len(samples) or 1,
         }
 
     def get(self, request):
@@ -505,33 +507,69 @@ class FullAnalysisListCreateView(APIView):
         })
 
     def post(self, request):
-        # Older clients send "name", while the upload page sends "sample_name".
-        sample_name = request.data.get("sample_name") or request.data.get("name") or "Uploaded sample"
-        uploaded_sample_code = request.data.get("sample_code") or sample_name
+        analysis_name = request.data.get("analysis_name") or request.data.get("name") or "Uploaded analysis"
         source_filename = request.data.get("source_filename", "")
-        measurements = request.data.get("measurements", [])
-        top_n = int(request.data.get("top_n", 10))
 
-        # An analysis without submitted measurements cannot be compared.
-        if not isinstance(measurements, list) or len(measurements) == 0:
+        try:
+            top_n = int(request.data.get("top_n", 10))
+        except (TypeError, ValueError):
             return Response(
-                {"error": "You must provide a non-empty measurements list."},
+                {"error": "top_n must be an integer."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        raw_samples = request.data.get("samples")
+
+        # Continue accepting the original single-sample request shape.
+        if not isinstance(raw_samples, list):
+            raw_samples = [{
+                "sample_code": request.data.get("sample_code"),
+                "name": request.data.get("sample_name") or request.data.get("name"),
+                "latitude": request.data.get("latitude"),
+                "longitude": request.data.get("longitude"),
+                "measurements": request.data.get("measurements"),
+            }]
+
+        samples = [
+            self.normalise_analysed_sample(sample, index)
+            for index, sample in enumerate(raw_samples)
+            if isinstance(sample, dict)
+        ]
+
+        if not samples:
+            return Response(
+                {"error": "You must provide at least one sample."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        invalid_samples = [
+            sample["sample_code"]
+            for sample in samples
+            if not sample["measurements"]
+        ]
+        if invalid_samples:
+            return Response(
+                {
+                    "error": "Every sample must contain at least one valid measurement.",
+                    "samples": invalid_samples,
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         # Protect the API from accidentally receiving a huge requested result set.
         top_n = max(1, min(top_n, 50))
+        first_sample = samples[0]
+        sample_snapshot = dict(request.data)
+        sample_snapshot["samples"] = samples
 
         # These records form one result. If an exception occurs, atomic() rolls
         # everything back rather than leaving a partially saved analysis.
         with transaction.atomic():
             full_analysis = FullAnalysis.objects.create(
-                name=sample_name,
-                uploaded_sample_code=uploaded_sample_code,
+                name=analysis_name,
+                uploaded_sample_code=first_sample["sample_code"],
                 source_filename=source_filename,
-                # Save the complete request as a snapshot of the test sample.
-                # dict() converts DRF's mapping wrapper into JSON-safe data.
-                sample_data=dict(request.data),
+                sample_data=sample_snapshot,
                 method="log_difference_similarity",
                 parameters={
                     "top_n": top_n,
@@ -542,7 +580,10 @@ class FullAnalysisListCreateView(APIView):
 
             created_measurements = []
 
-            for item in measurements:
+            # Retain the original related measurement rows for compatibility.
+            # In a multi-sample analysis these rows represent the first sample;
+            # the complete set of samples is stored in sample_data["samples"].
+            for item in first_sample["measurements"]:
                 # Symbols become dictionary keys later, so cu, Cu, and CU must
                 # all resolve to the same database Element.
                 element_symbol = self.normalise_element_symbol(
@@ -595,8 +636,24 @@ class FullAnalysisListCreateView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            # This runs synchronously; status stays "running" until it finishes.
-            ranked_matches = self.create_ranked_matches(full_analysis, top_n)
+            reference_samples = list(
+                ReferenceSample.objects
+                .select_related("reference_deposit")
+                .prefetch_related("measurements__element")
+                .all()
+            )
+
+            ranked_matches = []
+            for sample_index, sample in enumerate(samples):
+                ranked_matches.extend(
+                    self.create_ranked_matches(
+                        full_analysis,
+                        sample["measurements"],
+                        sample_index,
+                        top_n,
+                        reference_samples,
+                    )
+                )
 
             full_analysis.status = FullAnalysis.STATUS_COMPLETED
             full_analysis.completed_at = timezone.now()
@@ -606,13 +663,58 @@ class FullAnalysisListCreateView(APIView):
             {
                 "message": "Full analysis created.",
                 "full_analysis_id": full_analysis.id,
+                "analysed_sample_count": len(samples),
                 "ranked_match_count": len(ranked_matches),
                 "results_url": f"/api/full-analysis/{full_analysis.id}/",
             },
             status=status.HTTP_201_CREATED,
         )
 
-    def create_ranked_matches(self, full_analysis, top_n):
+    def normalise_analysed_sample(self, sample, sample_index):
+        """Return one stable JSON representation of a tested CSV row."""
+        sample_code = (
+            sample.get("sample_code")
+            or sample.get("sample_id")
+            or sample.get("name")
+            or f"Sample {sample_index + 1}"
+        )
+        measurements = []
+
+        for item in sample.get("measurements") or []:
+            if not isinstance(item, dict):
+                continue
+
+            symbol = self.normalise_element_symbol(
+                item.get("element_symbol") or item.get("symbol")
+            )
+            if not symbol:
+                continue
+
+            measurements.append({
+                "element_symbol": symbol,
+                "value": item.get("value"),
+                "unit": item.get("unit", "ppm"),
+                "below_detection_limit": bool(item.get("below_detection_limit", False)),
+                "detection_limit": item.get("detection_limit"),
+            })
+
+        return {
+            **sample,
+            "sample_code": str(sample_code),
+            "name": sample.get("name") or str(sample_code),
+            "latitude": sample.get("latitude"),
+            "longitude": sample.get("longitude"),
+            "measurements": measurements,
+        }
+
+    def create_ranked_matches(
+        self,
+        full_analysis,
+        measurements,
+        sample_index,
+        top_n,
+        reference_samples,
+    ):
         """
         Compare one saved test sample with the reference library.
 
@@ -622,28 +724,19 @@ class FullAnalysisListCreateView(APIView):
         """
         # Logarithms require positive values. Below-detection-limit readings are
         # excluded because they are not exact measured concentrations.
-        input_measurements = (
-            full_analysis.input_measurements
-            .filter(value__isnull=False, below_detection_limit=False)
-            .select_related("element")
-        )
-
         # A symbol-to-value dictionary makes finding shared elements inexpensive.
-        input_values = {
-            measurement.element.symbol: measurement.value
-            for measurement in input_measurements
-            if measurement.value is not None and measurement.value > 0
-        }
+        input_values = {}
+        for measurement in measurements:
+            if measurement.get("below_detection_limit"):
+                continue
+            try:
+                value = float(measurement.get("value"))
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                input_values[measurement["element_symbol"]] = value
 
         scored_samples = []
-
-        # Prefetch measurements to avoid a new database query for every sample.
-        reference_samples = (
-            ReferenceSample.objects
-            .select_related("reference_deposit")
-            .prefetch_related("measurements__element")
-            .all()
-        )
 
         for reference_sample in reference_samples:
             reference_values = {}
@@ -683,6 +776,7 @@ class FullAnalysisListCreateView(APIView):
             match = FullAnalysisMatch.objects.create(
                 full_analysis=full_analysis,
                 reference_sample=item["reference_sample"],
+                analysed_sample_index=sample_index,
                 rank=rank,
                 similarity_score=item["similarity_score"],
             )
@@ -760,6 +854,39 @@ class FullAnalysisResultView(APIView):
             .all()
         )
 
+        saved_samples = full_analysis.sample_data.get("samples")
+        if not isinstance(saved_samples, list) or not saved_samples:
+            # Shape analyses created before multi-sample support as a one-item
+            # collection so the results page can use one navigation model.
+            saved_samples = [{
+                **full_analysis.sample_data,
+                "sample_code": full_analysis.uploaded_sample_code,
+                "name": full_analysis.name,
+                "source_filename": full_analysis.source_filename,
+                "measurements": [
+                    self.serialize_input_measurement(measurement)
+                    for measurement in input_measurements
+                ],
+            }]
+
+        matches_by_sample = {}
+        for match in ranked_matches:
+            matches_by_sample.setdefault(match.analysed_sample_index, []).append({
+                "id": match.reference_sample_id,
+                "rank": match.rank,
+                "similarity_score": match.similarity_score,
+            })
+
+        analysed_samples = [
+            {
+                **sample,
+                "sample_index": sample_index,
+                "ranked_matches": matches_by_sample.get(sample_index, []),
+            }
+            for sample_index, sample in enumerate(saved_samples)
+        ]
+        first_sample = analysed_samples[0]
+
         # Keep the test sample complete, but do not duplicate reference-library
         # records inside every saved analysis response.
         return Response({
@@ -775,26 +902,10 @@ class FullAnalysisResultView(APIView):
                 "created_at": full_analysis.created_at,
                 "completed_at": full_analysis.completed_at,
             },
-            "analysed_sample": {
-                # Return the saved snapshot as well as the normalised measurement
-                # records below. This preserves any extra test-sample metadata.
-                **full_analysis.sample_data,
-                "sample_code": full_analysis.uploaded_sample_code,
-                "name": full_analysis.name,
-                "source_filename": full_analysis.source_filename,
-                "measurements": [
-                    self.serialize_input_measurement(measurement)
-                    for measurement in input_measurements
-                ],
-            },
-            "ranked_matches": [
-                {
-                    # This is ReferenceSample.id, not FullAnalysisMatch.id. The
-                    # results page uses it to request reference details.
-                    "id": match.reference_sample_id,
-                    "rank": match.rank,
-                    "similarity_score": match.similarity_score,
-                }
-                for match in ranked_matches
-            ],
+            "analysed_samples": analysed_samples,
+
+            # Compatibility aliases for clients that only understand the first
+            # tested sample in an analysis.
+            "analysed_sample": first_sample,
+            "ranked_matches": first_sample["ranked_matches"],
         })
