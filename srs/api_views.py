@@ -7,9 +7,10 @@ from rest_framework.response import Response
 from rest_framework import status
 
 import hashlib
+import heapq
 import threading
 
-from django.db import transaction
+from django.db import close_old_connections, transaction
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
@@ -564,113 +565,90 @@ class FullAnalysisListCreateView(APIView):
         sample_snapshot = dict(request.data)
         sample_snapshot["samples"] = samples
 
-        # These records form one result. If an exception occurs, atomic() rolls
-        # everything back rather than leaving a partially saved analysis.
-        with transaction.atomic():
-            full_analysis = FullAnalysis.objects.create(
-                name=analysis_name,
-                uploaded_sample_code=first_sample["sample_code"],
-                source_filename=source_filename,
-                sample_data=sample_snapshot,
-                method="log_difference_similarity",
-                parameters={
-                    "top_n": top_n,
-                    "note": "Temporary similarity method using common element log difference.",
-                },
-                status=FullAnalysis.STATUS_RUNNING,
-            )
+        full_analysis = FullAnalysis.objects.create(
+            name=analysis_name,
+            uploaded_sample_code=first_sample["sample_code"],
+            source_filename=source_filename,
+            sample_data=sample_snapshot,
+            method="log_difference_similarity",
+            parameters={
+                "top_n": top_n,
+                "batch_size": 250,
+                "samples_completed": 0,
+                "sample_count": len(samples),
+                "references_processed": 0,
+                "reference_count": ReferenceSample.objects.count(),
+                "note": "Background batched log-difference similarity.",
+            },
+            status=FullAnalysis.STATUS_PENDING,
+        )
 
-            created_measurements = []
-
-            # Retain the original related measurement rows for compatibility.
-            # In a multi-sample analysis these rows represent the first sample;
-            # the complete set of samples is stored in sample_data["samples"].
-            for item in first_sample["measurements"]:
-                # Symbols become dictionary keys later, so cu, Cu, and CU must
-                # all resolve to the same database Element.
-                element_symbol = self.normalise_element_symbol(
-                    item.get("element_symbol") or item.get("symbol")
-                )
-
-                if not element_symbol:
-                    continue
-
-                value = item.get("value", None)
-
-                # Preserve rows with missing/invalid values as null. They remain
-                # part of the test sample but do not participate in comparison.
-                if value in ["", None]:
-                    numeric_value = None
-                else:
-                    try:
-                        numeric_value = float(value)
-                    except (TypeError, ValueError):
-                        numeric_value = None
-
-                element, created = Element.objects.get_or_create(
-                    symbol=element_symbol,
-                    defaults={"name": element_symbol},
-                )
-
-                # Only one value is stored per element. For repeated elements in
-                # the request, the last submitted value wins.
-                measurement, created = FullAnalysisInputMeasurement.objects.update_or_create(
-                    full_analysis=full_analysis,
-                    element=element,
-                    defaults={
-                        "value": numeric_value,
-                        "unit": item.get("unit", "ppm"),
-                        "below_detection_limit": bool(item.get("below_detection_limit", False)),
-                        "detection_limit": item.get("detection_limit", None),
-                    },
-                )
-
-                created_measurements.append(measurement)
-
-            if len(created_measurements) == 0:
-                # Every submitted row lacked an element symbol.
-                full_analysis.status = FullAnalysis.STATUS_FAILED
-                full_analysis.completed_at = timezone.now()
-                full_analysis.save()
-
-                return Response(
-                    {"error": "No valid measurements were provided."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            reference_samples = list(
-                ReferenceSample.objects
-                .select_related("reference_deposit")
-                .prefetch_related("measurements__element")
-                .all()
-            )
-
-            ranked_matches = []
-            for sample_index, sample in enumerate(samples):
-                ranked_matches.extend(
-                    self.create_ranked_matches(
-                        full_analysis,
-                        sample["measurements"],
-                        sample_index,
-                        top_n,
-                        reference_samples,
-                    )
-                )
-
-            full_analysis.status = FullAnalysis.STATUS_COMPLETED
-            full_analysis.completed_at = timezone.now()
-            full_analysis.save()
+        # Return immediately instead of holding an HTTP request open for the
+        # complete calculation. Each thread opens its own database connection.
+        threading.Thread(
+            target=self.process_full_analysis,
+            args=(full_analysis.id,),
+            daemon=True,
+        ).start()
 
         return Response(
             {
-                "message": "Full analysis created.",
+                "message": "Full analysis queued.",
                 "full_analysis_id": full_analysis.id,
                 "analysed_sample_count": len(samples),
-                "ranked_match_count": len(ranked_matches),
+                "status": FullAnalysis.STATUS_PENDING,
                 "results_url": f"/api/full-analysis/{full_analysis.id}/",
             },
-            status=status.HTTP_201_CREATED,
+            status=status.HTTP_202_ACCEPTED,
         )
+
+    def process_full_analysis(self, full_analysis_id):
+        """Process every tested sample in bounded reference-library batches."""
+        close_old_connections()
+
+        try:
+            full_analysis = FullAnalysis.objects.get(id=full_analysis_id)
+            samples = full_analysis.sample_data.get("samples") or []
+            parameters = dict(full_analysis.parameters)
+            top_n = int(parameters["top_n"])
+            batch_size = int(parameters.get("batch_size", 250))
+
+            full_analysis.status = FullAnalysis.STATUS_RUNNING
+            full_analysis.save(update_fields=["status"])
+
+            for sample_index, sample in enumerate(samples):
+                self.create_ranked_matches(
+                    full_analysis,
+                    sample["measurements"],
+                    sample_index,
+                    top_n,
+                    batch_size,
+                )
+                parameters["samples_completed"] = sample_index + 1
+                parameters["references_processed"] = parameters["reference_count"]
+                full_analysis.parameters = parameters
+                full_analysis.save(update_fields=["parameters"])
+
+            full_analysis.status = FullAnalysis.STATUS_COMPLETED
+            full_analysis.completed_at = timezone.now()
+            full_analysis.save(update_fields=["status", "completed_at"])
+        except Exception as error:
+            FullAnalysis.objects.filter(id=full_analysis_id).update(
+                status=FullAnalysis.STATUS_FAILED,
+                completed_at=timezone.now(),
+                parameters={
+                    **(
+                        FullAnalysis.objects
+                        .filter(id=full_analysis_id)
+                        .values_list("parameters", flat=True)
+                        .first()
+                        or {}
+                    ),
+                    "error": str(error),
+                },
+            )
+        finally:
+            close_old_connections()
 
     def normalise_analysed_sample(self, sample, sample_index):
         """Return one stable JSON representation of a tested CSV row."""
@@ -715,7 +693,7 @@ class FullAnalysisListCreateView(APIView):
         measurements,
         sample_index,
         top_n,
-        reference_samples,
+        batch_size,
     ):
         """
         Compare one saved test sample with the reference library.
@@ -738,52 +716,83 @@ class FullAnalysisListCreateView(APIView):
             if value > 0:
                 input_values[measurement["element_symbol"]] = value
 
-        scored_samples = []
+        # Keep one global bounded heap across every batch. This guarantees the
+        # final ranking is the best top_n from the complete reference library,
+        # rather than a separate partial ranking from each batch.
+        best_matches = []
+        reference_count = ReferenceSample.objects.count()
+        FullAnalysisMatch.objects.filter(
+            full_analysis=full_analysis,
+            analysed_sample_index=sample_index,
+        ).delete()
 
-        for reference_sample in reference_samples:
-            reference_values = {}
-
-            for measurement in reference_sample.measurements.all():
-                if (
-                    measurement.value is not None
-                    and measurement.value > 0
-                    and not measurement.below_detection_limit
-                ):
-                    reference_values[measurement.element.symbol] = measurement.value
-
-            # Compare only elements with usable readings in both samples.
-            common_elements = sorted(set(input_values.keys()) & set(reference_values.keys()))
-
-            if not common_elements:
-                continue
-
-            score = self.calculate_similarity_score(
-                input_values,
-                reference_values,
-                common_elements,
+        for offset in range(0, reference_count, batch_size):
+            reference_batch = list(
+                ReferenceSample.objects
+                .select_related("reference_deposit")
+                .prefetch_related("measurements__element")
+                .order_by("id")[offset:offset + batch_size]
             )
 
-            scored_samples.append({
-                "reference_sample": reference_sample,
-                "similarity_score": score,
-                "elements_used": common_elements,
+            for reference_sample in reference_batch:
+                reference_values = {}
+
+                for measurement in reference_sample.measurements.all():
+                    if (
+                        measurement.value is not None
+                        and measurement.value > 0
+                        and not measurement.below_detection_limit
+                    ):
+                        reference_values[measurement.element.symbol] = measurement.value
+
+                common_elements = set(input_values) & set(reference_values)
+                if not common_elements:
+                    continue
+
+                score = self.calculate_similarity_score(
+                    input_values,
+                    reference_values,
+                    common_elements,
+                )
+                candidate = (score, reference_sample.id)
+
+                if len(best_matches) < top_n:
+                    heapq.heappush(best_matches, candidate)
+                elif candidate > best_matches[0]:
+                    heapq.heapreplace(best_matches, candidate)
+
+            parameters = dict(
+                FullAnalysis.objects
+                .filter(id=full_analysis.id)
+                .values_list("parameters", flat=True)
+                .first()
+                or {}
+            )
+            parameters.update({
+                "current_sample_index": sample_index,
+                "references_processed": min(offset + batch_size, reference_count),
+                "reference_count": reference_count,
             })
+            FullAnalysis.objects.filter(id=full_analysis.id).update(
+                parameters=parameters,
+            )
 
-        # Higher similarity is better, so the first saved result receives rank 1.
-        scored_samples.sort(key=lambda item: item["similarity_score"], reverse=True)
-
-        created_matches = []
-
-        for rank, item in enumerate(scored_samples[:top_n], start=1):
-            match = FullAnalysisMatch.objects.create(
+        ranked_candidates = sorted(best_matches, reverse=True)
+        created_matches = [
+            FullAnalysisMatch(
                 full_analysis=full_analysis,
-                reference_sample=item["reference_sample"],
+                reference_sample_id=reference_sample_id,
                 analysed_sample_index=sample_index,
                 rank=rank,
-                similarity_score=item["similarity_score"],
+                similarity_score=score,
             )
-
-            created_matches.append(match)
+            for rank, (score, reference_sample_id)
+            in enumerate(ranked_candidates, start=1)
+        ]
+        FullAnalysisMatch.objects.bulk_create(
+            created_matches,
+            batch_size=batch_size,
+        )
 
         return created_matches
 
