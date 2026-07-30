@@ -1,5 +1,6 @@
 from math import ceil, log10
 from django.db import transaction
+from django.db.models import Count
 from django.utils import timezone
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -834,6 +835,27 @@ class FullAnalysisResultView(APIView):
             "detection_limit": measurement.detection_limit,
         }
 
+    def get_saved_samples(self, full_analysis):
+        saved_samples = full_analysis.sample_data.get("samples")
+        if isinstance(saved_samples, list) and saved_samples:
+            return saved_samples
+
+        input_measurements = (
+            full_analysis.input_measurements
+            .select_related("element")
+            .all()
+        )
+        return [{
+            **full_analysis.sample_data,
+            "sample_code": full_analysis.uploaded_sample_code,
+            "name": full_analysis.name,
+            "source_filename": full_analysis.source_filename,
+            "measurements": [
+                self.serialize_input_measurement(measurement)
+                for measurement in input_measurements
+            ],
+        }]
+
     def get(self, request, full_analysis_id):
         try:
             full_analysis = FullAnalysis.objects.get(id=full_analysis_id)
@@ -843,52 +865,29 @@ class FullAnalysisResultView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        input_measurements = (
-            full_analysis.input_measurements
-            .select_related("element")
-            .all()
-        )
-
-        ranked_matches = (
-            full_analysis.ranked_matches
-            .all()
-        )
-
-        saved_samples = full_analysis.sample_data.get("samples")
-        if not isinstance(saved_samples, list) or not saved_samples:
-            # Shape analyses created before multi-sample support as a one-item
-            # collection so the results page can use one navigation model.
-            saved_samples = [{
-                **full_analysis.sample_data,
-                "sample_code": full_analysis.uploaded_sample_code,
-                "name": full_analysis.name,
-                "source_filename": full_analysis.source_filename,
-                "measurements": [
-                    self.serialize_input_measurement(measurement)
-                    for measurement in input_measurements
-                ],
-            }]
-
-        matches_by_sample = {}
-        for match in ranked_matches:
-            matches_by_sample.setdefault(match.analysed_sample_index, []).append({
-                "id": match.reference_sample_id,
-                "rank": match.rank,
-                "similarity_score": match.similarity_score,
-            })
-
+        saved_samples = self.get_saved_samples(full_analysis)
+        match_counts = {
+            row["analysed_sample_index"]: row["count"]
+            for row in (
+                full_analysis.ranked_matches
+                .values("analysed_sample_index")
+                .annotate(count=Count("id"))
+            )
+        }
         analysed_samples = [
             {
-                **sample,
                 "sample_index": sample_index,
-                "ranked_matches": matches_by_sample.get(sample_index, []),
+                "sample_code": sample.get("sample_code"),
+                "name": sample.get("name") or sample.get("sample_code"),
+                "latitude": sample.get("latitude"),
+                "longitude": sample.get("longitude"),
+                "match_count": match_counts.get(sample_index, 0),
             }
             for sample_index, sample in enumerate(saved_samples)
         ]
-        first_sample = analysed_samples[0]
 
-        # Keep the test sample complete, but do not duplicate reference-library
-        # records inside every saved analysis response.
+        # This endpoint stays lightweight even when every sample has thousands
+        # of matches. Sample measurements and matches have their own endpoint.
         return Response({
             "full_analysis_id": full_analysis.id,
             "full_analysis": {
@@ -903,9 +902,136 @@ class FullAnalysisResultView(APIView):
                 "completed_at": full_analysis.completed_at,
             },
             "analysed_samples": analysed_samples,
+        })
 
-            # Compatibility aliases for clients that only understand the first
-            # tested sample in an analysis.
-            "analysed_sample": first_sample,
-            "ranked_matches": first_sample["ranked_matches"],
+
+class FullAnalysisSampleResultView(FullAnalysisResultView):
+    """
+    GET /api/full-analysis/<analysis_id>/samples/<sample_index>/
+
+    Return one tested sample and one paginated page of its ranked matches.
+    """
+
+    def get(self, request, full_analysis_id, sample_index):
+        try:
+            full_analysis = FullAnalysis.objects.get(id=full_analysis_id)
+        except FullAnalysis.DoesNotExist:
+            return Response(
+                {"error": f"Full analysis {full_analysis_id} was not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        saved_samples = self.get_saved_samples(full_analysis)
+        if sample_index < 0 or sample_index >= len(saved_samples):
+            return Response(
+                {"error": f"Sample index {sample_index} was not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            page = max(1, int(request.query_params.get("page", 1)))
+            page_size = max(1, min(int(request.query_params.get("page_size", 50)), 100))
+        except (TypeError, ValueError):
+            return Response(
+                {"error": "page and page_size must be integers."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        matches = full_analysis.ranked_matches.filter(
+            analysed_sample_index=sample_index,
+        )
+        count = matches.count()
+        start = (page - 1) * page_size
+        page_matches = matches[start:start + page_size]
+        sample = saved_samples[sample_index]
+
+        return Response({
+            **sample,
+            "sample_index": sample_index,
+            "ranked_matches": {
+                "count": count,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": max(1, ceil(count / page_size)),
+                "results": [
+                    {
+                        "id": match.reference_sample_id,
+                        "rank": match.rank,
+                        "similarity_score": match.similarity_score,
+                    }
+                    for match in page_matches
+                ],
+            },
+        })
+
+
+class FullAnalysisSampleMapView(FullAnalysisResultView):
+    """
+    GET /api/full-analysis/<analysis_id>/samples/<sample_index>/map/
+
+    Return lightweight coordinates for every ranked reference match belonging
+    to one tested sample. Measurements are intentionally excluded.
+    """
+
+    def get(self, request, full_analysis_id, sample_index):
+        try:
+            full_analysis = FullAnalysis.objects.get(id=full_analysis_id)
+        except FullAnalysis.DoesNotExist:
+            return Response(
+                {"error": f"Full analysis {full_analysis_id} was not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        saved_samples = self.get_saved_samples(full_analysis)
+        if sample_index < 0 or sample_index >= len(saved_samples):
+            return Response(
+                {"error": f"Sample index {sample_index} was not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        matches = (
+            full_analysis.ranked_matches
+            .filter(analysed_sample_index=sample_index)
+            .select_related(
+                "reference_sample",
+                "reference_sample__reference_deposit",
+            )
+        )
+        results = []
+
+        for match in matches:
+            reference_sample = match.reference_sample
+            if reference_sample is None:
+                continue
+
+            deposit = reference_sample.reference_deposit
+            latitude = (
+                reference_sample.latitude
+                if reference_sample.latitude is not None
+                else (deposit.latitude if deposit else None)
+            )
+            longitude = (
+                reference_sample.longitude
+                if reference_sample.longitude is not None
+                else (deposit.longitude if deposit else None)
+            )
+
+            if latitude is None or longitude is None:
+                continue
+
+            results.append({
+                "id": reference_sample.id,
+                "sample_code": reference_sample.sample_code,
+                "rank": match.rank,
+                "similarity_score": match.similarity_score,
+                "latitude": latitude,
+                "longitude": longitude,
+            })
+
+        sample = saved_samples[sample_index]
+        return Response({
+            "sample_index": sample_index,
+            "sample_code": sample.get("sample_code"),
+            "count": len(results),
+            "results": results,
         })

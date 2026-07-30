@@ -8,6 +8,8 @@ from .api_views import (
     BulkReferenceSampleDetailView,
     FullAnalysisListCreateView,
     FullAnalysisResultView,
+    FullAnalysisSampleResultView,
+    FullAnalysisSampleMapView,
 )
 from .views import (
     AnalysisRunViewSet,
@@ -48,4 +50,12 @@ urlpatterns = [
 
     path("full-analysis/", FullAnalysisListCreateView.as_view()),
     path("full-analysis/<int:full_analysis_id>/", FullAnalysisResultView.as_view()),
+    path(
+        "full-analysis/<int:full_analysis_id>/samples/<int:sample_index>/",
+        FullAnalysisSampleResultView.as_view(),
+    ),
+    path(
+        "full-analysis/<int:full_analysis_id>/samples/<int:sample_index>/map/",
+        FullAnalysisSampleMapView.as_view(),
+    ),
 ]

@@ -27,17 +27,31 @@ load_dotenv(BASE_DIR / '.env')
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-fallback-key-change-me")
 
-DEBUG = os.environ.get("DEBUG", "False") == "True"
+# Local development defaults to debug mode. Deployed environments still default
+# to DEBUG=False unless DEBUG is explicitly configured.
+is_deployed = bool(
+    os.environ.get("RENDER")
+    or os.environ.get("RENDER_EXTERNAL_HOSTNAME")
+    or os.environ.get("WEBSITE_HOSTNAME")
+)
+DEBUG = os.environ.get(
+    "DEBUG",
+    "False" if is_deployed else "True",
+) == "True"
 
 ALLOWED_HOSTS = [
     host.strip()
-    for host in os.getenv("ALLOWED_HOSTS", "").split(",")
+    for host in os.getenv("ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")
     if host.strip()
 ]
 
 azure_hostname = os.getenv("WEBSITE_HOSTNAME")
 if azure_hostname and azure_hostname not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append(azure_hostname)
+
+render_hostname = os.getenv("RENDER_EXTERNAL_HOSTNAME")
+if render_hostname and render_hostname not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(render_hostname)
 
 
 # Application definition
