@@ -1,0 +1,197 @@
+Deposit Name,SAMPLE CODE,Sample,deposit_id,true_class,predicted_class,top_1_class,top_1_probability,top_2_class,top_2_probability,top_3_class,top_3_probability
+Gossan Hill,nan,700005,GHL,VHMS,VHMS,VHMS,0.8878115893293427,Skarn,0.0395409880498292,Orogenic - Intrusion Related Au,0.028835890354581277
+Gossan Hill,nan,700006,GHL,VHMS,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,0.3685641396708216,VHMS,0.30185916414115943,Epithermal,0.15339893371193453
+Gossan Hill,nan,700007,GHL,VHMS,VHMS,VHMS,0.6818805356176337,Sediment Hosted Pb-Zn,0.13976721302272024,Orogenic - Intrusion Related Au,0.10605967874750574
+Ladysmith(Flambeau),nan,700014,LAD,VHMS,VHMS,VHMS,0.7859463317144716,Epithermal,0.1581358895240205,Orogenic - Intrusion Related Au,0.02255915991256915
+Keno,nan,700033,KEO,Skarn,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.7860925872152507,Epithermal,0.17888837315650707,VHMS,0.011348355912386771
+Keno,nan,700034,KEO,Skarn,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.7808294376428184,Epithermal,0.19210231113955745,Skarn,0.01040365218488646
+Questa,nan,700044,QUE,Porphyry,Porphyry,Porphyry,0.8966284284321197,Skarn,0.0272786728070437,IOCG,0.023883991498400516
+Questa,nan,700045,QUE,Porphyry,Porphyry,Porphyry,0.9159422841773869,Orogenic - Intrusion Related Au,0.023859594680771812,Skarn,0.01374490402122679
+Martha,nan,700069,MAR,Epithermal,Epithermal,Epithermal,0.687794839181362,Orogenic - Intrusion Related Au,0.25182647328091545,Other,0.01717761414953545
+Martha,nan,700070,MAR,Epithermal,Epithermal,Epithermal,0.5269724324812164,Orogenic - Intrusion Related Au,0.3858640048764525,Other,0.019942286285067966
+Hemlo Williams,nan,700098,HWL,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.7200629114953307,VHMS,0.11944818708582604,Epithermal,0.07453276171056014
+Maybell,nan,700103,MAY,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.5150884518104659,Other,0.2913404309479273,IOCG,0.06736964296401027
+Maybell,nan,700104,MAY,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.47643896973472627,Other,0.25183272408851415,Porphyry,0.10259214539768337
+Wallaby,nan,700105,WAL,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.8846115445777658,Epithermal,0.10039882146632784,Other,0.00579555859080476
+Wallaby,nan,700106,WAL,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9361668760915767,Epithermal,0.047827914514079625,Other,0.005982556403291432
+Renco,nan,700118,REN,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.81014715765694,Epithermal,0.06012238001005821,IOCG,0.040914889093419206
+Renco,nan,700119,REN,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.3870314815913939,Epithermal,0.26833855064448275,IOCG,0.19646054585173608
+Luziania,nan,700121,LUZ,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.8620039270920226,Epithermal,0.06942873631698951,Other,0.042410628808326425
+Chuquicamata,nan,700147,CQU,Porphyry,Porphyry,Porphyry,0.7733350153404864,Orogenic - Intrusion Related Au,0.05781947592795565,Epithermal,0.0542531081797034
+Lucky Draw,nan,700148,LDW,Skarn,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.4888118970731202,Other,0.33148343893087645,IOCG,0.12667167292667267
+Grasberg,nan,700155,GRA,Porphyry,Porphyry,Porphyry,0.7314518233407258,Epithermal,0.07524600117985447,Orogenic - Intrusion Related Au,0.07217639314607248
+Grasberg,nan,700156,GRA,Porphyry,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.3228248809503127,IOCG,0.27393263641923116,Porphyry,0.2020542597233515
+Grasberg,nan,700157,GRA,Porphyry,Skarn,Skarn,0.4584479935413472,IOCG,0.2863856786814194,Porphyry,0.16683996572928295
+Telfer,nan,700162,TEL,Orogenic - Intrusion Related Au,IOCG,IOCG,0.3701645225078195,Epithermal,0.2544799204263995,Orogenic - Intrusion Related Au,0.23083649891956745
+Dikulushi,nan,700170,DIK,Sediment Hosted Cu,Sediment Hosted Cu,Sediment Hosted Cu,0.880134993188907,VHMS,0.030154513143458423,Other,0.022306400995521804
+Paddington,nan,700190,PDT,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9499966675855392,Epithermal,0.039724866931705495,Porphyry,0.0036647140821908786
+Paddington,nan,700191,PDT,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9838846683381066,Epithermal,0.013708870942769813,Porphyry,0.0007985391545521831
+Darlot,nan,700193,DLT,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9390920143049389,Epithermal,0.028170762121335357,Porphyry,0.016629189265436186
+Darlot,nan,700194,DLT,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9253509799708232,Epithermal,0.04957237547179636,Porphyry,0.009184584007727911
+Redeemer,nan,700214,RDM,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.6757739503342475,IOCG,0.1544074054083145,Other,0.04403984515755927
+Frasers,nan,700215,FRA,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9748166764645205,Porphyry,0.009466101444928765,IOCG,0.006039496384094307
+Lindsays,nan,700220,LND,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9867146587426965,Epithermal,0.008765853599694532,Porphyry,0.0010637042593249785
+Meekatharra Micky Doolan,nan,700243,MDM,Orogenic - Intrusion Related Au,Other,Other,0.46184016460160177,Orogenic - Intrusion Related Au,0.25120491146311347,Epithermal,0.07404043516518492
+Sheba,nan,700254,SHB,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.6737292619888844,Epithermal,0.16168901114666084,Other,0.1257889740839566
+Broken Hill Aggeneys,nan,700259,BHA,Other,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,0.4645504964557635,VHMS,0.404188454744012,Sediment Hosted Cu,0.07459684583237569
+Grasberg,nan,700262,GRA,Porphyry,Porphyry,Porphyry,0.3269613187142915,VHMS,0.24837663161754808,IOCG,0.1699398210961168
+Meekatharra Prohibition,nan,700270,MKP,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9831871695352987,Epithermal,0.013839446997351375,Other,0.0009866836931453676
+Granny Smith,nan,700276,GSM,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9670823717958728,Epithermal,0.02221763690715761,Porphyry,0.005141764401369925
+Sossego,nan,700277,SSG,IOCG,IOCG,IOCG,0.8857324372744426,Other,0.03156421728635837,Magmatic Ni-Cu-PGE,0.022917600242496186
+Sossego,nan,700278,SSG,IOCG,IOCG,IOCG,0.8940134413664891,Other,0.06315027055075015,Sediment Hosted Cu,0.019879488593776293
+Sossego,nan,700279,SSG,IOCG,IOCG,IOCG,0.6332883350500903,Porphyry,0.19653535233343947,VHMS,0.046218355943361905
+Henderson,nan,700292,HND,Porphyry,Porphyry,Porphyry,0.5866310213248498,Orogenic - Intrusion Related Au,0.08537355642184546,Sediment Hosted Pb-Zn,0.07211038411861917
+Polaris,nan,700316,PLS,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,0.990884715123501,Other,0.003530162660499676,VHMS,0.0016891820449555462
+Polaris,nan,700323,PLS,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,0.9865115119480355,Other,0.00525646291593563,VHMS,0.0026616283217605497
+Konkola,nan,700341,KNK,Sediment Hosted Cu,Sediment Hosted Cu,Sediment Hosted Cu,0.9317378373497873,Other,0.021177024130648068,Porphyry,0.021110731783300994
+Kansanshi,nan,700345,KAN,Sediment Hosted Cu,IOCG,IOCG,0.932076014909854,Other,0.020819293849052838,Porphyry,0.01326626683031287
+Kansanshi,nan,700346,KAN,Sediment Hosted Cu,IOCG,IOCG,0.8521784778979529,Sediment Hosted Cu,0.06082332475112997,Other,0.03939640416453763
+Six Mile Well,nan,700368,6MW,Magmatic Ni-Cu-PGE,Magmatic Ni-Cu-PGE,Magmatic Ni-Cu-PGE,0.8312554379388348,Other,0.038293305873442735,Orogenic - Intrusion Related Au,0.033698103004633675
+Six Mile Well,nan,700370,6MW,Magmatic Ni-Cu-PGE,Magmatic Ni-Cu-PGE,Magmatic Ni-Cu-PGE,0.831483527233496,Other,0.03736394088162028,Orogenic - Intrusion Related Au,0.03462255052543783
+Long,nan,700372,LNG,Magmatic Ni-Cu-PGE,Magmatic Ni-Cu-PGE,Magmatic Ni-Cu-PGE,0.9480976944948458,Other,0.011889515453252513,VHMS,0.01138920539144901
+Honeymoon Well,nan,700373,HYW,Magmatic Ni-Cu-PGE,Magmatic Ni-Cu-PGE,Magmatic Ni-Cu-PGE,0.9761059951478963,Other,0.009988994846626242,Orogenic - Intrusion Related Au,0.004533086485662844
+Golden Kilometre,nan,700383,GKM,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9469416508329342,Epithermal,0.05126899705615781,Porphyry,0.0005355237293763723
+Frasers,nan,700394,FRA,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9662359175428444,Epithermal,0.015415209141608727,IOCG,0.0067202958138671345
+Victory,nan,700401,VTY,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.930401255056656,Epithermal,0.039237950487809654,Other,0.010893836750008008
+Mount Morgans,nan,700403,MMG,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.8681182098072243,Porphyry,0.03873905957802752,Epithermal,0.03349635724112841
+Redeemer,nan,700404,RDM,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9252242088667175,Epithermal,0.034403440807220416,Other,0.022785077476906657
+Victory,nan,700426,VTY,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9749916930845652,Epithermal,0.010494444615296684,Porphyry,0.009476816036738864
+Long,nan,700431,LNG,Magmatic Ni-Cu-PGE,Magmatic Ni-Cu-PGE,Magmatic Ni-Cu-PGE,0.9801999194681065,Other,0.013837633714097464,Porphyry,0.0011095658006641642
+Long,nan,700432,LNG,Magmatic Ni-Cu-PGE,Magmatic Ni-Cu-PGE,Magmatic Ni-Cu-PGE,0.820834192781437,IOCG,0.052494478055353094,Other,0.040937949733633405
+Chelopech,nan,700441,CLP,Epithermal,Epithermal,Epithermal,0.46113716930995785,Orogenic - Intrusion Related Au,0.2825518234482809,VHMS,0.13148303857262886
+Fankou,nan,700447,FNK,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,0.2718665855204264,VHMS,0.2437385060967868,Other,0.22830231111322738
+Endeavour Elura,nan,700457,EDV,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,0.6532566656213153,VHMS,0.18165055146305686,Other,0.06935418360095608
+Mount Morgan,nan,700468,MTM,Epithermal,VHMS,VHMS,0.3277971888880391,Orogenic - Intrusion Related Au,0.18947805015103725,Porphyry,0.11241030940050571
+Mount Morgan,nan,700469,MTM,Epithermal,Porphyry,Porphyry,0.42960852606763156,Orogenic - Intrusion Related Au,0.1466901851946548,Epithermal,0.10871354793124755
+Salt Creek,nan,700492,SCK,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9521308370281153,Porphyry,0.019182163459546035,Epithermal,0.015365448005598883
+Canadian Malartic,nan,700494,CMA,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9612977094585455,Epithermal,0.019454976955507217,Porphyry,0.00862834614355943
+Canadian Malartic,nan,700495,CMA,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9067730488961826,Porphyry,0.043957120528071214,Epithermal,0.03110950904578955
+Dome Mine,nan,700501,DOM,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.8332060345772834,Porphyry,0.05537774762307142,Epithermal,0.027431789714649366
+Pine Cove,nan,700508,PCV,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9468188924515146,Epithermal,0.045945217557689266,Other,0.0032667161770954566
+Dikulushi,nan,700518,DIK,Sediment Hosted Cu,Sediment Hosted Cu,Sediment Hosted Cu,0.8823553829738137,VHMS,0.046096056646041744,Porphyry,0.024480094282047376
+Oyu Tolgoi,nan,700531,OYT,Porphyry,Porphyry,Porphyry,0.9445192649519492,IOCG,0.02077937288699621,Sediment Hosted Cu,0.011682262754081607
+Rosebery,nan,700554,ROS,VHMS,VHMS,VHMS,0.9545009919222363,Skarn,0.012767443221675768,Sediment Hosted Pb-Zn,0.011494569747486793
+Rosebery,nan,700555,ROS,VHMS,VHMS,VHMS,0.8069712915646455,Sediment Hosted Cu,0.07625278539424762,Other,0.03710694428670555
+Rosebery,nan,700556,ROS,VHMS,VHMS,VHMS,0.9735474843368251,Skarn,0.005162065248496907,Porphyry,0.0050748400857242686
+Rosebery,nan,700557,ROS,VHMS,Skarn,Skarn,0.7040448721591953,VHMS,0.14334047844603043,IOCG,0.041597813800172675
+Tabakoto,nan,700573,TBK,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9792834867522356,Epithermal,0.009766668225432996,Other,0.0045650850245884216
+Mount Muro,nan,700593,MMR,Epithermal,Epithermal,Epithermal,0.9308679966704128,Orogenic - Intrusion Related Au,0.0479004549839436,Sediment Hosted Pb-Zn,0.009524953834326551
+Century,nan,700616,CEN,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,0.9636369909889801,VHMS,0.01653717892206524,Other,0.007553200292585822
+Meskan,nan,700620,MSK,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,0.8573852614503108,Epithermal,0.031870528986989305,Orogenic - Intrusion Related Au,0.028565394264959135
+Meskan,nan,700621,MSK,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,0.958743530698069,VHMS,0.008253635764143664,Other,0.007961155165631496
+Meskan,nan,700622,MSK,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,0.9626697106948046,VHMS,0.0077448611861713375,Other,0.006498909549360662
+Ain Allega,nan,700625,AIA,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,0.992739787242126,VHMS,0.003927609745022112,Other,0.000910807273802161
+Rudna,nan,700630,RDN,Sediment Hosted Cu,Sediment Hosted Cu,Sediment Hosted Cu,0.5642233342012084,Sediment Hosted Pb-Zn,0.3196370754452666,VHMS,0.044071301915216854
+Rudna,nan,700631,RDN,Sediment Hosted Cu,Sediment Hosted Cu,Sediment Hosted Cu,0.8811408846912214,Sediment Hosted Pb-Zn,0.032080359632648145,VHMS,0.02664769938012231
+Los Bronces,nan,700634,LBR,Porphyry,Porphyry,Porphyry,0.47710607751435896,IOCG,0.2640732777804321,Skarn,0.1604611518042224
+Los Bronces,nan,700636,LBR,Porphyry,Porphyry,Porphyry,0.3955366247954971,Sediment Hosted Cu,0.2406852830852852,Epithermal,0.090035983445649
+Los Bronces,nan,700637,LBR,Porphyry,Porphyry,Porphyry,0.5946229273565737,Skarn,0.14943281509478945,VHMS,0.05680529531641634
+Tung Khum,nan,700638,TGK,Porphyry,Porphyry,Porphyry,0.675027465249324,Skarn,0.09539098127482808,Orogenic - Intrusion Related Au,0.06220465365737267
+Monywa,nan,700640,MNY,Epithermal,IOCG,IOCG,0.19537309840410227,Porphyry,0.19065247915024747,Other,0.1561380666500361
+Monywa,nan,700641,MNY,Epithermal,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.466090802427787,Epithermal,0.20785495342384594,IOCG,0.12917975495469564
+Tucari,nan,700658,TUC,Epithermal,Skarn,Skarn,0.2650408634589495,Epithermal,0.18351078534536608,Other,0.1508424722436175
+Kennecott,nan,700660,KNC,Sediment Hosted Cu,Sediment Hosted Cu,Sediment Hosted Cu,0.5251553833876422,Porphyry,0.26869683515992937,Epithermal,0.04102040731459019
+Chibuluma,nan,700662,CBL,Sediment Hosted Cu,Sediment Hosted Cu,Sediment Hosted Cu,0.8812507821084166,VHMS,0.038772367289314914,Other,0.03185365200169073
+Darlot,nan,700672,DLT,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9542574531860488,Epithermal,0.029653230667581743,Porphyry,0.0070882557366119614
+Endeavour Elura,nan,700688,EDV,Sediment Hosted Pb-Zn,VHMS,VHMS,0.9912020555482108,IOCG,0.002216164568645557,Porphyry,0.0013015786960109822
+Cijulang,nan,700707,CJL,Epithermal,Epithermal,Epithermal,0.9021344230821609,Orogenic - Intrusion Related Au,0.055198452338005854,VHMS,0.012705396498958894
+Bellvue,nan,700716,BLV,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.5007882790935674,Porphyry,0.3194160492621605,IOCG,0.07468526354622342
+Bidini,nan,700721,BID,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9901663543267065,Epithermal,0.007246702874170071,Other,0.0009818117764654305
+Bidini,nan,700722,BID,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9361048374756878,Other,0.02543294691358191,Epithermal,0.013009997697218206
+Sadiola,nan,700729,SAD,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.8934435812979645,Epithermal,0.07835086748677915,Other,0.022946323224520223
+Sadiola,nan,700730,SAD,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.947818752106673,Epithermal,0.02412969247447508,IOCG,0.006957783498125749
+Sadiola,nan,700731,SAD,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9012166469558238,Epithermal,0.046470330485318886,Other,0.0133388393879898
+Century,nan,700753,CEN,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,0.9624092392213522,VHMS,0.016272867484796363,Epithermal,0.01048310863417941
+Century,nan,700754,CEN,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,0.9270515027629957,Other,0.03366109947192303,Epithermal,0.023884472872004073
+Raglan,nan,700759,RAG,Magmatic Ni-Cu-PGE,Magmatic Ni-Cu-PGE,Magmatic Ni-Cu-PGE,0.9949900760218092,Other,0.001379603786666873,IOCG,0.0009437370047331173
+Jabal Sayid,nan,700767,JSD,VHMS,Porphyry,Porphyry,0.645830249416401,Skarn,0.1380580711008797,VHMS,0.08909647475879223
+Eskay Creek,nan,700779,ESK,VHMS,VHMS,VHMS,0.399590154987496,Epithermal,0.39090835806191043,Sediment Hosted Pb-Zn,0.08425920980358531
+Eskay Creek,nan,700780,ESK,VHMS,Epithermal,Epithermal,0.6230864293297309,Orogenic - Intrusion Related Au,0.2129516179676998,VHMS,0.11599596887644636
+Eskay Creek,nan,700781,ESK,VHMS,VHMS,VHMS,0.811157325856931,Epithermal,0.07110339515249434,Orogenic - Intrusion Related Au,0.04723954441926713
+Eskay Creek,nan,700782,ESK,VHMS,Epithermal,Epithermal,0.611112145501008,VHMS,0.1817732462124616,Sediment Hosted Pb-Zn,0.07532807191232987
+Eskay Creek,nan,700783,ESK,VHMS,Epithermal,Epithermal,0.39215272697151604,VHMS,0.26043686224652374,Sediment Hosted Pb-Zn,0.1125871923195465
+Meekatharra Prohibition,nan,700785,MKP,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9225316066834746,Epithermal,0.0526726297347941,Other,0.014960688729232178
+Meekatharra Micky Doolan,nan,700786,MDM,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.8324759646094986,Epithermal,0.076139751019031,Other,0.025017002730172835
+Mount Morgans,nan,700787,MMG,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.8408124392919594,Epithermal,0.06727715152391517,Other,0.025399084600959455
+Darlot,nan,700803,DLT,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9574005696219776,Epithermal,0.03365101566159803,Porphyry,0.004083303550084289
+Darlot,nan,700804,DLT,Orogenic - Intrusion Related Au,Epithermal,Epithermal,0.4891981722662003,Orogenic - Intrusion Related Au,0.4371556914790671,Skarn,0.03879528484825647
+Darlot,nan,700805,DLT,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9428407573267481,Epithermal,0.04497235563452886,IOCG,0.0031206290403779976
+Darlot,nan,700806,DLT,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9612867649778559,Epithermal,0.026037329013151637,Porphyry,0.004869819208909049
+Darlot,nan,700807,DLT,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.948481786227808,Epithermal,0.04604997753680762,Porphyry,0.002527820103722372
+Darlot,nan,700808,DLT,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9666157370408286,Epithermal,0.01464761006494326,Porphyry,0.007843272595615817
+Phavat,nan,700814,VAT,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.6987830916383008,Epithermal,0.28420273301478516,VHMS,0.006013781972872524
+Xinqiao,nan,700818,XQO,Orogenic - Intrusion Related Au,Skarn,Skarn,0.3640560660517178,Orogenic - Intrusion Related Au,0.32366039520246204,Epithermal,0.13757422060565183
+Chelopech,nan,700819,CLP,Epithermal,VHMS,VHMS,0.6045617203505799,Epithermal,0.25909166117506416,Orogenic - Intrusion Related Au,0.05530413939592588
+Sanmianjing,nan,700821,SMJ,Skarn,Other,Other,0.371474229767455,Skarn,0.21895284420632607,VHMS,0.19756364124767523
+Rocklands,nan,700828,RKL,IOCG,IOCG,IOCG,0.3997246654734102,Sediment Hosted Cu,0.21466359720662267,Other,0.13550886548557614
+Rocklands,nan,700829,RKL,IOCG,IOCG,IOCG,0.5312176953806826,VHMS,0.08125162233627664,Orogenic - Intrusion Related Au,0.08070202042948703
+Rocklands,nan,700830,RKL,IOCG,IOCG,IOCG,0.6615464474365877,Sediment Hosted Cu,0.1279652387026048,Other,0.06199995588799947
+Wallaby,nan,700832,WAL,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.8840442115612724,Epithermal,0.05923361525511918,Other,0.031228502472389213
+Wallaby,nan,700833,WAL,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9195703966460899,Epithermal,0.06275212144418237,Other,0.00733769283616454
+Wallaby,nan,700834,WAL,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.7639632755977188,Other,0.08342450002210357,Epithermal,0.07366218603404591
+Wallaby,nan,700835,WAL,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.6742180255358314,Other,0.18614149736201174,Epithermal,0.09979142968944336
+Wallaby,nan,700836,WAL,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.788110780324053,Other,0.15163904909162756,Epithermal,0.02579241709816805
+Wallaby,nan,700837,WAL,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9565680471257108,Epithermal,0.030680666244327644,Other,0.004903811761845703
+Spotted Quoll,nan,700848,SQL,Magmatic Ni-Cu-PGE,Magmatic Ni-Cu-PGE,Magmatic Ni-Cu-PGE,0.9807998131091966,Other,0.008165190717726367,Sediment Hosted Cu,0.002734672123812761
+Long-Victor,nan,700852,LNG,Magmatic Ni-Cu-PGE,Magmatic Ni-Cu-PGE,Magmatic Ni-Cu-PGE,0.9927566109230099,Other,0.002572779641560381,Skarn,0.0009691432683500698
+Telfer,nan,700857,TEL,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.43890307531458417,IOCG,0.2794191647087566,Skarn,0.15117946013249067
+Telfer,nan,700858,TEL,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.6936785131984199,Epithermal,0.1330904138677919,Porphyry,0.09945204972164398
+Telfer,nan,700859,TEL,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.7821558732028923,Skarn,0.05814974424531273,Porphyry,0.05509455291871888
+Telfer,nan,700860,TEL,Orogenic - Intrusion Related Au,Other,Other,0.3480458367088685,IOCG,0.31195944183322855,Orogenic - Intrusion Related Au,0.2663899357962291
+Telfer,nan,700861,TEL,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.6345990324390163,IOCG,0.2109977986508202,Epithermal,0.040810263130617155
+Telfer,nan,700862,TEL,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.5232896336467213,IOCG,0.25028012529612,Epithermal,0.06131779548399066
+Ban Phuc,nan,700882,BPH,Magmatic Ni-Cu-PGE,Magmatic Ni-Cu-PGE,Magmatic Ni-Cu-PGE,0.9741002548617739,Other,0.006658042530663771,Sediment Hosted Cu,0.004390409961113455
+Ok Tedi,nan,700888,OKT,Porphyry,Porphyry,Porphyry,0.8449594359613064,IOCG,0.06352080870286349,Orogenic - Intrusion Related Au,0.032533142198959614
+Ok Tedi,nan,700889,OKT,Porphyry,Porphyry,Porphyry,0.5793439980208938,IOCG,0.1671803141799832,Sediment Hosted Cu,0.07566165735120009
+Ok Tedi,nan,700890,OKT,Porphyry,IOCG,IOCG,0.843488111344127,Porphyry,0.043036031040348775,VHMS,0.02899990290420901
+Ok Tedi,nan,700891,OKT,Porphyry,IOCG,IOCG,0.47710495482806925,Skarn,0.14855929246164107,Sediment Hosted Cu,0.1160424517496401
+Binduli,nan,700904,BND,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9759136477917596,Epithermal,0.01727816106657624,Porphyry,0.002335414941048937
+Redeemer,nan,700909,RDM,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.8120293544473868,Other,0.12798254116251462,Sediment Hosted Cu,0.015120085589470795
+Moline Dam,nan,700912,MLD,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.8375189823504654,Other,0.06075578340930789,Skarn,0.04086923550130971
+Enterprise NT,nan,700913,ETP,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.7811309330404633,Epithermal,0.19455767213807101,Skarn,0.01821267782057181
+Granny Smith,nan,700925,GSM,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9597914687749102,Epithermal,0.01793428558001972,IOCG,0.007964506047722426
+Granny Smith,nan,700926,GSM,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9559011980722816,Epithermal,0.015442817797775153,Other,0.009175967152426688
+Zheng Guang,nan,700929,ZGG,Epithermal,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.6251144014066526,Epithermal,0.3444330998154818,Other,0.01151576500384971
+Correnso,nan,700943,CRR,Epithermal,Epithermal,Epithermal,0.6322058005692581,Orogenic - Intrusion Related Au,0.22990314519924668,VHMS,0.09471074979280249
+Challenger,nan,700957,CHG,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.8984156850681666,Other,0.08602382896130953,Epithermal,0.005857866535233544
+Baguamiao,nan,700959,BGM,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.890684733010649,IOCG,0.044602772384030175,Epithermal,0.03930692325234251
+Hemlo,nan,700961,HWL,Orogenic - Intrusion Related Au,Epithermal,Epithermal,0.5936355127505735,Orogenic - Intrusion Related Au,0.331940018846151,VHMS,0.03434346078774183
+Lady Gladys,nan,700965,LGY,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.5823786788823876,Other,0.16017722293693537,IOCG,0.09210094608674962
+Lady Gladys,nan,700966,LGY,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.8767287649790076,Other,0.04700281277471819,IOCG,0.01915667955124364
+Binduli,nan,700969,BND,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.8407530870760026,Epithermal,0.14583878218227334,Other,0.006631787967394562
+Paulsens,nan,700971,PLN,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.8157025648011944,Other,0.05565697100544787,Epithermal,0.038518488990413075
+Jinduizhen,nan,700974,JDC,Porphyry,Porphyry,Porphyry,0.49397833896868143,Orogenic - Intrusion Related Au,0.14277721762714846,IOCG,0.09396316731547466
+Dedgekan,nan,700980,DDK,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.7216597614061978,Other,0.12292345553771476,Epithermal,0.05130564403508721
+Dedgekan,nan,700983,DDK,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9235157929148519,Other,0.029726144038840698,Epithermal,0.019709378568912903
+Konuto Lake,nan,701027,KLK,VHMS,VHMS,VHMS,0.5170553923850538,IOCG,0.25291348391120017,Porphyry,0.1281595717420545
+Konuto Lake,nan,701028,KLK,VHMS,VHMS,VHMS,0.7711188683578591,Epithermal,0.11566579003820357,Orogenic - Intrusion Related Au,0.08095027880467331
+Callinan,nan,701035,CNN,VHMS,VHMS,VHMS,0.985674093643891,IOCG,0.00600619530002276,Sediment Hosted Pb-Zn,0.0019117943601710085
+Broken Hill Aggeneys,nan,701038,BHA,Other,Other,Other,0.8752476396890225,Sediment Hosted Pb-Zn,0.09174456855973213,VHMS,0.007672769025866465
+Broken Hill Aggeneys,nan,701040,BHA,Other,Sediment Hosted Pb-Zn,Sediment Hosted Pb-Zn,0.8093664732755165,VHMS,0.11033888040063591,Sediment Hosted Cu,0.06170260135802667
+Broken Hill Aggeneys,nan,701041,BHA,Other,Other,Other,0.8662522096924181,Sediment Hosted Pb-Zn,0.0626084022485364,Skarn,0.027062145062222574
+Padcal,nan,701069,PCL,Porphyry,Porphyry,Porphyry,0.7816379769286664,Orogenic - Intrusion Related Au,0.08623006325383799,IOCG,0.049273305881362084
+Padcal,nan,701070,PCL,Porphyry,Porphyry,Porphyry,0.7648599669291332,Orogenic - Intrusion Related Au,0.10507494877130934,IOCG,0.03574156559704496
+Maroochydore,nan,701136,MYD,Sediment Hosted Cu,Sediment Hosted Cu,Sediment Hosted Cu,0.8430741047655637,VHMS,0.08301818407214963,Skarn,0.020705904918695416
+Chelopech,nan,701137,CLP,Epithermal,VHMS,VHMS,0.39362111358916574,Skarn,0.21488234856219335,Epithermal,0.2003577405447046
+Uchaly,nan,701142,UCY,VHMS,VHMS,VHMS,0.9246850382213281,Orogenic - Intrusion Related Au,0.03527879982138001,Sediment Hosted Pb-Zn,0.010889103715369018
+Uchaly,nan,701143,UCY,VHMS,VHMS,VHMS,0.9880424400286021,Skarn,0.003753767241018019,Epithermal,0.0022929649640922316
+Canadian Malartic,nan,701166,CMA,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.6790955318160434,Porphyry,0.1012871615049515,Other,0.0825155675325256
+Beaconsfield,nan,701172,BCF,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.46298919465854194,Epithermal,0.4560327253992989,Porphyry,0.04725821352700263
+Paddington,nan,701173,PDT,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.8903607177030569,Epithermal,0.1070973083846582,Skarn,0.0006985390241095279
+Mount Muro,1.0,701190,MMR,Epithermal,Epithermal,Epithermal,0.3961506624270645,Orogenic - Intrusion Related Au,0.13226440703156284,Sediment Hosted Pb-Zn,0.13069157624821767
+Tharsis,nan,701205,TSS,VHMS,VHMS,VHMS,0.9734690117452234,Epithermal,0.009329354796826502,IOCG,0.004219444412591493
+Chuquicamata,nan,701212,CQU,Porphyry,Porphyry,Porphyry,0.9208814668321605,IOCG,0.03469605229561022,Epithermal,0.013749376031559896
+Los Bronces,nan,701213,LBR,Porphyry,Porphyry,Porphyry,0.8836139019763434,IOCG,0.04906673944003255,Sediment Hosted Cu,0.03147281348623145
+Canadian Malartic,nan,701216,CMA,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9582315432124684,Other,0.017008712598245296,Porphyry,0.0084319860824817
+Lapa,nan,701217,LPA,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.9845370954594386,Other,0.0065665298060973406,Epithermal,0.005682910690576753
+Nicholsons Find,nan,701220,NCF,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.7916678594906215,Epithermal,0.17020066677448484,Other,0.029257842247435297
+Nicholsons Find,nan,701221,NCF,Orogenic - Intrusion Related Au,Epithermal,Epithermal,0.4875917529295523,Orogenic - Intrusion Related Au,0.4039579274352476,Skarn,0.046885133865303324
+Nicholsons Find,nan,701222,NCF,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,Orogenic - Intrusion Related Au,0.7873135706238099,Epithermal,0.19717773262726762,Other,0.005774979207169448
+Barbara,nan,BAR011,BRB,IOCG,IOCG,IOCG,0.7434493148662288,Sediment Hosted Cu,0.11515834049575045,Porphyry,0.03918603058502723
+Barbara,nan,BAR012,BRB,IOCG,IOCG,IOCG,0.8321921957989662,Other,0.03807328037414055,Porphyry,0.033560664976396606
+Barbara,nan,BAR021,BRB,IOCG,IOCG,IOCG,0.956090806690658,Other,0.025610441952048195,Sediment Hosted Cu,0.008040364019586644
+Blackard,nan,BLA003,BKD,IOCG,Sediment Hosted Cu,Sediment Hosted Cu,0.39818667701701277,Other,0.26402672906331703,IOCG,0.1278862222941431
+Blackard,nan,BLA007,BKD,IOCG,Sediment Hosted Cu,Sediment Hosted Cu,0.7880185335231117,Other,0.07957399229866252,IOCG,0.05174835405231791
+Starra,nan,STA022,STR,IOCG,IOCG,IOCG,0.881008457837333,Orogenic - Intrusion Related Au,0.04009608048756548,Other,0.015378899789815048
+Starra,nan,STA023,STR,IOCG,IOCG,IOCG,0.8480999355371984,Orogenic - Intrusion Related Au,0.0648940940490785,Porphyry,0.016177551981708744
+Trekelano,nan,TRE017,TRK,IOCG,IOCG,IOCG,0.8342528189910827,Magmatic Ni-Cu-PGE,0.0580198225335978,Sediment Hosted Cu,0.046416092352232645
