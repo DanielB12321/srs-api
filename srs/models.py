@@ -369,6 +369,21 @@ class FullAnalysis(models.Model):
     method = models.CharField(max_length=100, default="log_difference_similarity")
     parameters = models.JSONField(default=dict, blank=True)
 
+    # Provenance for the run, promoted out of the parameters blob so results can
+    # be grouped and filtered by algorithm when comparing how they perform.
+    # Every field is optional: analyses saved before these existed keep working.
+    algorithm_id = models.CharField(max_length=100, blank=True, default="")
+    algorithm_version = models.CharField(max_length=20, blank=True, default="")
+    pipeline_version = models.CharField(max_length=20, blank=True, default="")
+    reference_library_version = models.CharField(max_length=255, blank=True, default="")
+    runtime_ms = models.FloatField(null=True, blank=True)
+
+    # Optional envelope blocks. Only filled in by algorithms that declare the
+    # matching capability, so they stay null for the concentration-based methods.
+    sample_results = models.JSONField(null=True, blank=True)
+    projection = models.JSONField(null=True, blank=True)
+    warnings = models.JSONField(default=list, blank=True)
+
     status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,
@@ -439,6 +454,17 @@ class FullAnalysisMatch(models.Model):
     analysed_sample_index = models.PositiveIntegerField(default=0)
     rank = models.PositiveIntegerField()
     similarity_score = models.FloatField()
+
+    # Algorithm-native metrics beside the normalised score, and how much the
+    # nearest references agree with this match. Both are small and are kept for
+    # every match.
+    scores = models.JSONField(null=True, blank=True)
+    confidence = models.JSONField(null=True, blank=True)
+
+    # Per-element support for the match. Roughly 3.4 KB per row once populated,
+    # which is why it is stored only for the leading matches rather than for
+    # all of them. See the detail_top_n parameter.
+    evidence = models.JSONField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
 

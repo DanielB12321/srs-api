@@ -166,6 +166,14 @@ MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
+# Which similarity algorithm runs when a request does not name one. Must match
+# an id registered in srs/algorithms/__init__.py; an unrecognised value falls
+# back to log_difference_similarity rather than stopping the service.
+SRS_DEFAULT_ALGORITHM = os.environ.get(
+    "SRS_DEFAULT_ALGORITHM",
+    "log_difference_similarity",
+)
+
 CORS_ALLOWED_ORIGINS = os.environ.get(
     "CORS_ALLOWED_ORIGINS",
     "http://127.0.0.1:8000,http://localhost:8000"

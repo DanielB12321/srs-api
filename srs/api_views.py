@@ -1,4 +1,4 @@
-from math import ceil, log10
+from math import ceil
 from django.db import transaction
 from django.db.models import Count
 from django.utils import timezone
@@ -10,6 +10,8 @@ import hashlib
 import heapq
 import threading
 
+from time import perf_counter
+
 from django.db import close_old_connections, transaction
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema, OpenApiParameter
@@ -19,7 +21,18 @@ from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from .algorithms import available_algorithms, get_algorithm
+from .algorithms.base import PairwiseSimilarity
+from .algorithms.knn_aitchison import DEFAULT_DETAIL_TOP_N
+from .projections import fit_pca, project_points
 from .importers import run_import, run_dataset_import
+from .preprocessing import (
+    PIPELINE_VERSION,
+    extract_values,
+    normalise_symbol,
+    prepare_vectors,
+    resolve_options,
+)
 from .services.units import concentration_to_ppm
 
 from math import ceil
@@ -48,6 +61,29 @@ from .serializers import (
     DatasetUploadSerializer,
     ReferenceLibrarySearchResultSerializer,
 )
+
+def reference_library_version() -> str:
+    """
+    Identify the reference library a run was scored against.
+
+    The most recent completed import is the anchor. There is no separate
+    version field on the library, and inventing one would mean maintaining a
+    scheme that could drift from the imports it describes.
+    """
+    latest = (
+        ReferenceImport.objects
+        .filter(status=ReferenceImport.STATUS_COMPLETED)
+        .order_by("-completed_at", "-id")
+        .values_list("id", "source_name")
+        .first()
+    )
+
+    if not latest:
+        return ""
+
+    import_id, source_name = latest
+    return f"{import_id}:{source_name}"
+
 
 def _sha256_of(uploaded_file) -> str:
     hasher = hashlib.sha256()
@@ -457,6 +493,42 @@ class BulkReferenceSampleDetailView(APIView):
 
 
 
+class SimilarityAlgorithmListView(APIView):
+    """
+    GET /api/algorithms/
+
+    List the similarity algorithms this deployment can run, so the analysis
+    setup page can offer the choice instead of hardcoding a list that drifts
+    from what the service actually supports. The id of any entry is a valid
+    similarity_method for POST /api/full-analysis/.
+    """
+
+    @extend_schema(
+        responses={200: OpenApiTypes.OBJECT},
+        description=(
+            "Similarity algorithms available to this deployment. Each result "
+            "carries an id usable as similarity_method when creating a full "
+            "analysis, its version, the optional result blocks it can produce, "
+            "and whether it is the configured default."
+        ),
+    )
+    def get(self, request):
+        algorithms = available_algorithms()
+
+        return Response({
+            "count": len(algorithms),
+            "default": next(
+                (
+                    algorithm["id"]
+                    for algorithm in algorithms
+                    if algorithm["is_default"]
+                ),
+                None,
+            ),
+            "results": algorithms,
+        })
+
+
 class FullAnalysisListCreateView(APIView):
     """
     GET  /api/full-analysis/
@@ -472,12 +544,9 @@ class FullAnalysisListCreateView(APIView):
 
     def normalise_element_symbol(self, symbol):
         """Return a consistently capitalised symbol, for example 'CU' -> 'Cu'."""
-        symbol = str(symbol or "").strip()
-
-        if not symbol:
-            return ""
-
-        return symbol[0].upper() + symbol[1:].lower()
+        # One implementation, in the preprocessing package, so a symbol written
+        # by the request path and one read by the pipeline cannot disagree.
+        return normalise_symbol(symbol)
 
     def serialize_full_analysis_summary(self, full_analysis):
         samples = full_analysis.sample_data.get("samples") or []
@@ -576,6 +645,11 @@ class FullAnalysisListCreateView(APIView):
         sample_snapshot = dict(request.data)
         sample_snapshot["samples"] = samples
 
+        # Record which algorithm actually ran, not just what was asked for. An
+        # unrecognised similarity_method resolves to the default, and without
+        # this a stored analysis would claim to have used something it did not.
+        resolved_algorithm = get_algorithm(similarity_method)
+
         full_analysis = FullAnalysis.objects.create(
             name=analysis_name,
             uploaded_sample_code=first_sample["sample_code"],
@@ -590,6 +664,9 @@ class FullAnalysisListCreateView(APIView):
                 "selected_elements": request.data.get("selected_elements") or [],
                 "preprocessing": preprocessing,
                 "similarity_method": similarity_method,
+                "algorithm_id": resolved_algorithm.id,
+                "algorithm_version": resolved_algorithm.version,
+                "pipeline_version": PIPELINE_VERSION,
                 "samples_completed": 0,
                 "sample_count": len(samples),
                 "references_processed": 0,
@@ -633,9 +710,23 @@ class FullAnalysisListCreateView(APIView):
                 "log_difference_similarity",
             )
             preprocessing = parameters.get("preprocessing") or {}
+            algorithm = get_algorithm(similarity_method)
 
+            # Provenance is written before the work starts, so a run that fails
+            # partway still records what was scoring it.
             full_analysis.status = FullAnalysis.STATUS_RUNNING
-            full_analysis.save(update_fields=["status"])
+            full_analysis.algorithm_id = algorithm.id
+            full_analysis.algorithm_version = algorithm.version
+            full_analysis.pipeline_version = PIPELINE_VERSION
+            full_analysis.reference_library_version = reference_library_version()
+            full_analysis.save(update_fields=[
+                "status",
+                "algorithm_id",
+                "algorithm_version",
+                "pipeline_version",
+                "reference_library_version",
+            ])
+            started = perf_counter()
 
             for sample_index, sample in enumerate(samples):
                 parameters.update({
@@ -661,7 +752,26 @@ class FullAnalysisListCreateView(APIView):
 
             full_analysis.status = FullAnalysis.STATUS_COMPLETED
             full_analysis.completed_at = timezone.now()
-            full_analysis.save(update_fields=["status", "completed_at"])
+            full_analysis.runtime_ms = (perf_counter() - started) * 1000
+            full_analysis.sample_results = self.build_sample_results(
+                full_analysis,
+                samples,
+            )
+            full_analysis.projection = self.build_projection(
+                full_analysis,
+                samples,
+                resolve_options(
+                    preprocessing,
+                    parameters.get("selected_elements"),
+                ),
+            )
+            full_analysis.save(update_fields=[
+                "status",
+                "completed_at",
+                "runtime_ms",
+                "sample_results",
+                "projection",
+            ])
         except Exception as error:
             FullAnalysis.objects.filter(id=full_analysis_id).update(
                 status=FullAnalysis.STATUS_FAILED,
@@ -679,6 +789,111 @@ class FullAnalysisListCreateView(APIView):
             )
         finally:
             close_old_connections()
+
+    def build_sample_results(self, full_analysis, samples):
+        """
+        Summarise each analysed sample and its leading matches.
+
+        This is the envelope's per-sample block. It is small by design, holding
+        only the top few matches per sample, so the map and overview views can
+        be drawn without paging through every ranked match.
+        """
+        leading = (
+            full_analysis.ranked_matches
+            .filter(rank__lte=5)
+            .select_related("reference_sample__reference_deposit")
+            .order_by("analysed_sample_index", "rank")
+        )
+        by_sample = {}
+
+        for match in leading:
+            reference_sample = match.reference_sample
+            deposit = (
+                reference_sample.reference_deposit
+                if reference_sample is not None
+                else None
+            )
+            by_sample.setdefault(match.analysed_sample_index, []).append({
+                "reference_sample_id": match.reference_sample_id,
+                "deposit_id": (deposit.three_char_code if deposit else ""),
+                "deposit_name": (deposit.name if deposit else ""),
+                "similarity": match.similarity_score,
+            })
+
+        return [
+            {
+                "sample_id": sample.get("sample_code"),
+                "lat": sample.get("latitude"),
+                "lon": sample.get("longitude"),
+                "top_matches": by_sample.get(sample_index, []),
+            }
+            for sample_index, sample in enumerate(samples)
+        ]
+
+    def build_projection(self, full_analysis, samples, options, max_references=200):
+        """
+        Place the analysed samples and their matches on a two-dimensional map.
+
+        The axes are fitted on the matched references rather than on the whole
+        library, which bounds both the memory used and the number of points a
+        client has to draw. PCA is used because it yields a fixed linear map,
+        so an uploaded sample lands in the same space as the references without
+        anything being recomputed.
+
+        Returns None when there is too little shared chemistry to place points
+        honestly; the projection block is optional precisely so that this is a
+        valid outcome.
+        """
+        matched_ids = list(
+            full_analysis.ranked_matches
+            .filter(rank__lte=max_references)
+            .values_list("reference_sample_id", flat=True)
+            .distinct()
+        )
+        if not matched_ids:
+            return None
+
+        reference_values = {}
+        for reference_sample in (
+            ReferenceSample.objects
+            .filter(id__in=matched_ids)
+            .prefetch_related("measurements__element")
+        ):
+            values, _ = extract_values(reference_sample.measurements.all(), options)
+            if values:
+                reference_values[reference_sample.id] = values
+
+        sample_values = {}
+        for sample_index, sample in enumerate(samples):
+            values, _ = extract_values(sample.get("measurements") or [], options)
+            if values:
+                sample_values[sample_index] = values
+
+        model = fit_pca(list(reference_values.values()) + list(sample_values.values()))
+        if model is None:
+            return None
+
+        points = project_points(
+            model,
+            [
+                (str(sample.get("sample_code") or index), "sample", values)
+                for index, (sample, values) in enumerate(
+                    (samples[i], v) for i, v in sample_values.items()
+                )
+            ] + [
+                (str(reference_id), "reference", values)
+                for reference_id, values in reference_values.items()
+            ],
+        )
+        if not points:
+            return None
+
+        return {
+            "method": "pca",
+            "elements_used": model.symbols,
+            "explained_variance_ratio": model.explained_variance_ratio,
+            "points": points,
+        }
 
     def normalise_analysed_sample(self, sample, sample_index):
         """Return one stable JSON representation of a tested CSV row."""
@@ -734,20 +949,32 @@ class FullAnalysisListCreateView(APIView):
         match. Descriptive reference data stays in the reference library and is
         requested separately when the results page needs it.
         """
-        # Logarithms require positive values. Below-detection-limit readings are
-        # excluded because they are not exact measured concentrations.
-        # A symbol-to-value dictionary makes finding shared elements inexpensive.
-        input_values = {}
-        for measurement in measurements:
-            if measurement.get("below_detection_limit"):
-                continue
+        # Resolved once, outside the reference loop, so policy names are not
+        # revalidated on every one of a thousand comparisons.
+        options = resolve_options(
+            preprocessing,
+            (full_analysis.parameters or {}).get("selected_elements"),
+        )
+        algorithm = get_algorithm(similarity_method)
 
-            value = concentration_to_ppm(
-                measurement.get("value"),
-                measurement.get("unit"),
+        # An algorithm that needs the whole library at once cannot be driven by
+        # the streaming heap below, so it gets its own path. Without this a
+        # non-pairwise algorithm would be selectable and then silently fail.
+        if not isinstance(algorithm, PairwiseSimilarity):
+            return self.create_ranked_matches_via_compare(
+                algorithm,
+                full_analysis,
+                measurements,
+                sample_index,
+                top_n,
+                batch_size,
+                options,
             )
-            if value is not None:
-                input_values[measurement["element_symbol"]] = value
+
+        # A symbol-to-value dictionary makes finding shared elements inexpensive.
+        # The pipeline handles unit conversion, the censored-data policy, and
+        # the user's element selection.
+        input_values, input_imputed = extract_values(measurements, options)
 
         # Keep one global bounded heap across every batch. This guarantees the
         # final ranking is the best top_n from the complete reference library,
@@ -768,18 +995,10 @@ class FullAnalysisListCreateView(APIView):
             )
 
             for reference_sample in reference_batch:
-                reference_values = {}
-
-                for measurement in reference_sample.measurements.all():
-                    if measurement.below_detection_limit:
-                        continue
-
-                    value = concentration_to_ppm(
-                        measurement.value,
-                        measurement.unit,
-                    )
-                    if value is not None:
-                        reference_values[measurement.element.symbol] = value
+                reference_values, reference_imputed = extract_values(
+                    reference_sample.measurements.all(),
+                    options,
+                )
 
                 common_elements = set(input_values) & set(reference_values)
                 if not common_elements:
@@ -790,7 +1009,8 @@ class FullAnalysisListCreateView(APIView):
                     reference_values,
                     common_elements,
                     similarity_method,
-                    preprocessing,
+                    options,
+                    input_imputed | reference_imputed,
                 )
                 candidate = (score, reference_sample.id)
 
@@ -816,6 +1036,17 @@ class FullAnalysisListCreateView(APIView):
             )
 
         ranked_candidates = sorted(best_matches, reverse=True)
+        detail_top_n = int(
+            (full_analysis.parameters or {}).get("detail_top_n", DEFAULT_DETAIL_TOP_N)
+        )
+        detail = self.build_match_detail(
+            algorithm,
+            input_values,
+            input_imputed,
+            ranked_candidates[:detail_top_n],
+            options,
+        )
+
         created_matches = [
             FullAnalysisMatch(
                 full_analysis=full_analysis,
@@ -823,6 +1054,7 @@ class FullAnalysisListCreateView(APIView):
                 analysed_sample_index=sample_index,
                 rank=rank,
                 similarity_score=score,
+                **detail.get(reference_sample_id, {}),
             )
             for rank, (score, reference_sample_id)
             in enumerate(ranked_candidates, start=1)
@@ -834,84 +1066,204 @@ class FullAnalysisListCreateView(APIView):
 
         return created_matches
 
+    def create_ranked_matches_via_compare(
+        self,
+        algorithm,
+        full_analysis,
+        measurements,
+        sample_index,
+        top_n,
+        batch_size,
+        options,
+    ):
+        """
+        Run an algorithm that needs every reference in memory at once.
+
+        Anything that fits a model or builds a projection cannot be scored one
+        reference at a time, so the library is materialised and handed over
+        whole. That costs more memory than the streaming path, which is why the
+        streaming path remains the default and this is used only when an
+        algorithm genuinely requires it.
+        """
+        input_values, input_imputed = extract_values(measurements, options)
+
+        FullAnalysisMatch.objects.filter(
+            full_analysis=full_analysis,
+            analysed_sample_index=sample_index,
+        ).delete()
+
+        references = []
+        for reference_sample in (
+            ReferenceSample.objects
+            .select_related("reference_deposit")
+            .prefetch_related("measurements__element")
+            .order_by("id")
+            .iterator(chunk_size=batch_size)
+        ):
+            values, imputed = extract_values(
+                reference_sample.measurements.all(),
+                options,
+            )
+            if not values:
+                continue
+
+            deposit = reference_sample.reference_deposit
+            references.append({
+                "id": reference_sample.id,
+                "values": values,
+                "imputed": imputed,
+                "deposit_id": (deposit.three_char_code or deposit.name) if deposit else "",
+                "deposit_name": deposit.name if deposit else "",
+                "deposit_class": (deposit.deposit_type or "") if deposit else "",
+            })
+
+        result = algorithm.compare(
+            [{
+                "sample_code": full_analysis.uploaded_sample_code,
+                "values": input_values,
+                "imputed": input_imputed,
+            }],
+            references,
+            {"top_n": top_n, "preprocessing": options},
+        )
+
+        created_matches = [
+            FullAnalysisMatch(
+                full_analysis=full_analysis,
+                reference_sample_id=match.reference_sample_id,
+                analysed_sample_index=sample_index,
+                rank=match.rank,
+                similarity_score=float(match.similarity),
+                scores=match.scores or None,
+                confidence=match.confidence,
+                evidence=(
+                    {
+                        "supporting": [item.to_dict() for item in match.supporting],
+                        "conflicting": [item.to_dict() for item in match.conflicting],
+                    }
+                    if (match.supporting or match.conflicting)
+                    else None
+                ),
+            )
+            for match in result.matches
+        ]
+        FullAnalysisMatch.objects.bulk_create(created_matches, batch_size=batch_size)
+
+        return created_matches
+
+    def build_match_detail(
+        self,
+        algorithm,
+        input_values,
+        input_imputed,
+        ranked_candidates,
+        options,
+    ):
+        """
+        Compute the extra per-match blocks for the leading matches only.
+
+        Ranking already used every reference, so nothing is lost from the
+        ordering. What is avoided is attaching an evidence block of roughly
+        3.4 KB to each of a few hundred rows that nobody opens.
+
+        An algorithm that offers none of these returns empty defaults from the
+        base class, so this costs one query and nothing else for the
+        concentration-based methods.
+        """
+        if not ranked_candidates:
+            return {}
+
+        reference_ids = [
+            reference_sample_id
+            for _, reference_sample_id in ranked_candidates
+        ]
+        reference_samples = (
+            ReferenceSample.objects
+            .filter(id__in=reference_ids)
+            .select_related("reference_deposit")
+            .prefetch_related("measurements__element")
+        )
+        by_id = {sample.id: sample for sample in reference_samples}
+
+        # Which deposits the nearest references belong to, in rank order. This
+        # is what lets an algorithm judge a match by the company it keeps.
+        nearest_deposits = []
+        for _, reference_sample_id in ranked_candidates:
+            reference_sample = by_id.get(reference_sample_id)
+            deposit = reference_sample.reference_deposit if reference_sample else None
+            nearest_deposits.append(
+                (deposit.three_char_code or deposit.name) if deposit else ""
+            )
+
+        detail = {}
+
+        for (_, reference_sample_id), deposit_id in zip(
+            ranked_candidates, nearest_deposits
+        ):
+            reference_sample = by_id.get(reference_sample_id)
+            if reference_sample is None:
+                continue
+
+            reference_values, reference_imputed = extract_values(
+                reference_sample.measurements.all(),
+                options,
+            )
+            common_elements = set(input_values) & set(reference_values)
+            if not common_elements:
+                continue
+
+            prepared = prepare_vectors(
+                input_values,
+                reference_values,
+                common_elements,
+                options,
+                input_imputed | reference_imputed,
+            )
+            supporting, conflicting = algorithm.evidence(prepared)
+            raw_scores = algorithm.raw_scores(prepared)
+            confidence = algorithm.confidence(deposit_id, nearest_deposits)
+
+            row = {}
+            if raw_scores:
+                row["scores"] = raw_scores
+            if confidence:
+                row["confidence"] = confidence
+            if supporting or conflicting:
+                row["evidence"] = {
+                    "supporting": [item.to_dict() for item in supporting],
+                    "conflicting": [item.to_dict() for item in conflicting],
+                }
+
+            if row:
+                detail[reference_sample_id] = row
+
+        return detail
+
     def calculate_similarity_score(
         self,
         input_values,
         reference_values,
         common_elements,
-        similarity_method="log_difference_similarity",
+        similarity_method=None,
         preprocessing=None,
+        imputed_elements=None,
     ):
         """
-        Return mean logarithmic similarity across the shared elements.
+        Score one tested sample against one reference sample.
 
-        Identical concentrations score 1 for an element; a tenfold difference
-        scores 0.5. Logarithms make proportional differences comparable across
-        elements whose concentrations have very different magnitudes.
+        The arithmetic lives in srs/algorithms/, one module per algorithm. This
+        resolves the requested method through the registry and delegates, so an
+        unknown or missing name still falls back to the configured default.
         """
-        preprocessing = preprocessing or {}
-        symbols = sorted(common_elements)
-        input_vector = [input_values[symbol] for symbol in symbols]
-        reference_vector = [reference_values[symbol] for symbol in symbols]
+        algorithm = get_algorithm(similarity_method)
 
-        if not input_vector:
-            return 0
-
-        # CLR normalisation includes a log transform and centres each sample
-        # around its geometric mean. Missing values are already handled by using
-        # only the elements shared by the tested and reference samples.
-        if preprocessing.get("normalise"):
-            input_logs = [log10(value) for value in input_vector]
-            reference_logs = [log10(value) for value in reference_vector]
-            input_mean = sum(input_logs) / len(input_logs)
-            reference_mean = sum(reference_logs) / len(reference_logs)
-            input_vector = [value - input_mean for value in input_logs]
-            reference_vector = [value - reference_mean for value in reference_logs]
-        elif preprocessing.get("log_transform"):
-            input_vector = [log10(value) for value in input_vector]
-            reference_vector = [log10(value) for value in reference_vector]
-
-        if similarity_method == "correlation" and len(input_vector) >= 2:
-            input_mean = sum(input_vector) / len(input_vector)
-            reference_mean = sum(reference_vector) / len(reference_vector)
-            input_centred = [value - input_mean for value in input_vector]
-            reference_centred = [value - reference_mean for value in reference_vector]
-            numerator = sum(
-                left * right
-                for left, right in zip(input_centred, reference_centred)
-            )
-            denominator = (
-                sum(value * value for value in input_centred)
-                * sum(value * value for value in reference_centred)
-            ) ** 0.5
-            return (1 + numerator / denominator) / 2 if denominator else 0
-
-        if similarity_method == "association":
-            numerator = sum(
-                left * right
-                for left, right in zip(input_vector, reference_vector)
-            )
-            denominator = (
-                sum(value * value for value in input_vector)
-                * sum(value * value for value in reference_vector)
-            ) ** 0.5
-            cosine = numerator / denominator if denominator else 0
-            return max(0, min(1, (cosine + 1) / 2))
-
-        if similarity_method == "distance":
-            element_scores = [
-                1 / (1 + abs(left - right))
-                for left, right in zip(input_vector, reference_vector)
-            ]
-            return sum(element_scores) / len(element_scores)
-
-        # The legacy method retains the original logarithmic difference score so
-        # API clients that omit a method remain backwards compatible.
-        element_scores = [
-            1 / (1 + abs(log10(input_values[symbol]) - log10(reference_values[symbol])))
-            for symbol in symbols
-        ]
-        return sum(element_scores) / len(element_scores)
+        return algorithm.score_pair(
+            input_values,
+            reference_values,
+            common_elements,
+            preprocessing,
+            imputed_elements,
+        )
 
 
 class FullAnalysisResultView(APIView):
@@ -999,8 +1351,18 @@ class FullAnalysisResultView(APIView):
                 "status": full_analysis.status,
                 "created_at": full_analysis.created_at,
                 "completed_at": full_analysis.completed_at,
+                # Provenance, added alongside the existing keys rather than
+                # replacing any of them.
+                "algorithm_id": full_analysis.algorithm_id,
+                "algorithm_version": full_analysis.algorithm_version,
+                "pipeline_version": full_analysis.pipeline_version,
+                "reference_library_version": full_analysis.reference_library_version,
+                "runtime_ms": full_analysis.runtime_ms,
             },
             "analysed_samples": analysed_samples,
+            "sample_results": full_analysis.sample_results,
+            "projection": full_analysis.projection,
+            "warnings": full_analysis.warnings,
         })
 
 
@@ -1010,6 +1372,30 @@ class FullAnalysisSampleResultView(FullAnalysisResultView):
 
     Return one tested sample and one paginated page of its ranked matches.
     """
+
+    def serialize_ranked_match(self, match):
+        """
+        Serialise one ranked match.
+
+        id, rank, and similarity_score keep the names and positions they have
+        always had. The newer blocks are added only when an algorithm actually
+        produced them, so a response for a method that produces none is
+        byte-identical to what it was before they existed.
+        """
+        result = {
+            "id": match.reference_sample_id,
+            "rank": match.rank,
+            "similarity_score": match.similarity_score,
+        }
+
+        if match.scores:
+            result["scores"] = match.scores
+        if match.confidence:
+            result["confidence"] = match.confidence
+        if match.evidence:
+            result["evidence"] = match.evidence
+
+        return result
 
     def get(self, request, full_analysis_id, sample_index):
         try:
@@ -1053,11 +1439,7 @@ class FullAnalysisSampleResultView(FullAnalysisResultView):
                 "page_size": page_size,
                 "total_pages": max(1, ceil(count / page_size)),
                 "results": [
-                    {
-                        "id": match.reference_sample_id,
-                        "rank": match.rank,
-                        "similarity_score": match.similarity_score,
-                    }
+                    self.serialize_ranked_match(match)
                     for match in page_matches
                 ],
             },
