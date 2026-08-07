@@ -1,6 +1,6 @@
 from django.test import SimpleTestCase
 
-from .services.units import concentration_to_ppm
+from ..services.units import concentration_to_ppm
 
 
 class ConcentrationConversionTests(SimpleTestCase):

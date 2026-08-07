@@ -10,6 +10,7 @@ from .api_views import (
     FullAnalysisResultView,
     FullAnalysisSampleResultView,
     FullAnalysisSampleMapView,
+    SimilarityAlgorithmListView,
 )
 from .views import (
     DepositClassificationViewSet,
@@ -43,6 +44,8 @@ urlpatterns = [
     path("reference-samples/bulk-details/", BulkReferenceSampleDetailView.as_view()),
     path("", include(router.urls)),
     path("reference-library/search/", ReferenceLibrarySearchView.as_view()),
+
+    path("algorithms/", SimilarityAlgorithmListView.as_view()),
 
     path("full-analysis/", FullAnalysisListCreateView.as_view()),
     path("full-analysis/<int:full_analysis_id>/", FullAnalysisResultView.as_view()),
