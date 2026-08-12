@@ -9,6 +9,7 @@ from rest_framework import status
 import hashlib
 import heapq
 import threading
+import json
 
 from time import perf_counter
 
@@ -548,9 +549,26 @@ class FullAnalysisListCreateView(APIView):
         # by the request path and one read by the pipeline cannot disagree.
         return normalise_symbol(symbol)
 
+
     def serialize_full_analysis_summary(self, full_analysis):
-        samples = full_analysis.sample_data.get("samples") or []
+        sample_data = full_analysis.sample_data or {}
+
+        if isinstance(sample_data, str):
+            try:
+                sample_data = json.loads(sample_data)
+            except (json.JSONDecodeError, TypeError):
+                sample_data = {}
+
         parameters = full_analysis.parameters or {}
+
+        if isinstance(parameters, str):
+            try:
+                parameters = json.loads(parameters)
+            except (json.JSONDecodeError, TypeError):
+                parameters = {}
+
+        samples = sample_data.get("samples") or []
+
         return {
             "id": full_analysis.id,
             "name": full_analysis.name,
@@ -565,7 +583,7 @@ class FullAnalysisListCreateView(APIView):
             "sample_codes": [
                 sample.get("sample_code")
                 for sample in samples
-                if sample.get("sample_code")
+                if isinstance(sample, dict) and sample.get("sample_code")
             ] or [full_analysis.uploaded_sample_code],
             "selected_elements": parameters.get("selected_elements") or [],
             "preprocessing": parameters.get("preprocessing") or {},
