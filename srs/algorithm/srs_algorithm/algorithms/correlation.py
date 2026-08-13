@@ -1,10 +1,11 @@
 """Pearson correlation between two element patterns."""
 
 from .base import PairwiseSimilarity, weighted_dot, weighted_mean
+from .confidence import VotedConfidenceMixin
 from .log_difference import LogDifferenceSimilarity
 
 
-class CorrelationSimilarity(PairwiseSimilarity):
+class CorrelationSimilarity(VotedConfidenceMixin, PairwiseSimilarity):
     """
     Score how similarly two samples rise and fall across their shared elements.
 
@@ -17,10 +18,13 @@ class CorrelationSimilarity(PairwiseSimilarity):
     a monotone transform onto [0, 1], so 0.5 means uncorrelated rather than
     moderately similar. A constant vector has no correlation to measure and
     scores 0.
+
+    Confidence comes from VotedConfidenceMixin, same as the other pairwise
+    algorithms.
     """
 
     id = "correlation"
-    version = "1.0.0"
+    version = "1.1.0"
     capabilities = frozenset()
 
     def score_vectors(self, prepared):

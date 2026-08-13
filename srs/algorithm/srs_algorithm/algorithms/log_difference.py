@@ -3,9 +3,10 @@
 from math import log10
 
 from .base import PairwiseSimilarity, weighted_mean
+from .confidence import VotedConfidenceMixin
 
 
-class LogDifferenceSimilarity(PairwiseSimilarity):
+class LogDifferenceSimilarity(VotedConfidenceMixin, PairwiseSimilarity):
     """
     Compare concentrations by how many decades apart they sit.
 
@@ -19,10 +20,15 @@ class LogDifferenceSimilarity(PairwiseSimilarity):
     identical, so no extra squashing is applied. The transform is monotone in
     the mean absolute log difference, so rank-based benchmark metrics are
     unaffected by the choice.
+
+    Confidence comes from VotedConfidenceMixin, same as the other pairwise
+    algorithms. Note CorrelationSimilarity imports this class directly as its
+    single-element fallback, so this module has to keep importing cleanly on
+    its own — don't add anything here that depends on correlation.py.
     """
 
     id = "log_difference_similarity"
-    version = "1.0.0"
+    version = "1.1.0"
     capabilities = frozenset()
 
     def score_vectors(self, prepared):

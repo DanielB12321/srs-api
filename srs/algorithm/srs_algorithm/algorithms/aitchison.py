@@ -4,17 +4,16 @@ from math import log10, sqrt
 
 from ..preprocessing import prepare_vectors, resolve_options
 from .base import PairwiseSimilarity, weighted_dot
+from .confidence import VotedConfidenceMixin
 from .envelope import Evidence
 
 #: How many nearest references vote on a match's confidence.
 DEFAULT_K = 5
 
-#: Evidence, raw metrics, and confidence are attached to this many matches.
-#: Computing them for a full ranking of every reference would multiply the row
-#: size of a result set that already runs to hundreds of rows per sample.
+#: Evidence and raw metrics are attached to this many matches. Confidence
+#: itself is now handled generically by PairwiseSimilarity.compare() via
+#: VotedConfidenceMixin, so this only governs evidence/raw_scores below.
 DEFAULT_DETAIL_TOP_N = 10
-
-_LEVEL_THRESHOLDS = ((0.6, "high"), (0.3, "medium"))
 
 
 def _average_ranks(values):
@@ -60,7 +59,7 @@ def _centred(values):
     return [value - mean for value in values]
 
 
-class KnnAitchisonSimilarity(PairwiseSimilarity):
+class KnnAitchisonSimilarity(VotedConfidenceMixin, PairwiseSimilarity):
     """
     Compare samples as compositions rather than as lists of concentrations.
 
@@ -88,6 +87,10 @@ class KnnAitchisonSimilarity(PairwiseSimilarity):
     ranking and rank-based benchmark metrics are unaffected by the choice, and
     bounded to (0, 1] with 1 meaning compositionally identical.
 
+    Confidence comes from VotedConfidenceMixin — how many of the k nearest
+    references share a match's deposit — the same signal the other pairwise
+    algorithms use, so a 0.6 consistency means the same thing everywhere.
+
     Be aware that these similarities are much lower in absolute terms than the
     concentration-based methods produce, because Aitchison distances across a
     diverse reference library are large. A user interface threshold tuned
@@ -96,7 +99,7 @@ class KnnAitchisonSimilarity(PairwiseSimilarity):
     """
 
     id = "knn_aitchison"
-    version = "1.0.0"
+    version = "1.1.0"
     capabilities = frozenset({"evidence"})
 
     def score_vectors(self, prepared):
@@ -190,15 +193,11 @@ class KnnAitchisonSimilarity(PairwiseSimilarity):
 
     def compare(self, samples, references, config=None):
         """
-        Rank as usual, then attach the detail only this algorithm can produce.
-
-        Raw metrics, evidence, and kNN confidence are computed for the leading
-        matches rather than for every reference. Ranking already used all of
-        them, so nothing is lost from the ordering; what is avoided is
-        attaching several blocks of detail to hundreds of rows that no one
-        opens.
+        Rank as usual (base class handles confidence generically now), then
+        attach the evidence and raw metrics only this algorithm can produce.
         """
         config = config or {}
+        config.setdefault("k", DEFAULT_K)
         # Materialised before ranking so the references can be revisited below
         # even when a generator was passed in.
         reference_list = list(references)
@@ -207,9 +206,7 @@ class KnnAitchisonSimilarity(PairwiseSimilarity):
         if not result.matches or not samples:
             return result
 
-        neighbours = int(config.get("k", DEFAULT_K))
         detail_top_n = int(config.get("detail_top_n", DEFAULT_DETAIL_TOP_N))
-        result.algorithm_params.update({"k": neighbours})
 
         options = resolve_options(
             config.get("preprocessing"),
@@ -222,14 +219,6 @@ class KnnAitchisonSimilarity(PairwiseSimilarity):
             reference.get("id"): reference
             for reference in reference_list
         }
-
-        # Which deposits the k nearest references belong to. This is the kNN
-        # part: a match is more trustworthy when several samples from the same
-        # deposit independently rank near the top.
-        nearest_deposits = [
-            match.deposit_id or match.deposit_name
-            for match in result.matches[:neighbours]
-        ]
 
         for match in result.matches[:detail_top_n]:
             reference = references_by_id.get(match.reference_sample_id)
@@ -251,31 +240,5 @@ class KnnAitchisonSimilarity(PairwiseSimilarity):
 
             match.scores.update(self.raw_scores(prepared))
             match.supporting, match.conflicting = self.evidence(prepared)
-            match.confidence = self.confidence(
-                match.deposit_id or match.deposit_name,
-                nearest_deposits,
-            )
 
         return result
-
-    def confidence(self, deposit_id, nearest_deposits):
-        """Judge a match by how many of the nearest references agree with it."""
-        deposit = deposit_id
-        agreeing = sum(
-            1
-            for neighbour in nearest_deposits
-            if neighbour and neighbour == deposit
-        )
-        consistency = agreeing / len(nearest_deposits) if nearest_deposits else 0.0
-
-        level = "low"
-        for threshold, name in _LEVEL_THRESHOLDS:
-            if consistency >= threshold:
-                level = name
-                break
-
-        return {
-            "consistency": consistency,
-            "n_reference_samples": agreeing,
-            "level": level,
-        }

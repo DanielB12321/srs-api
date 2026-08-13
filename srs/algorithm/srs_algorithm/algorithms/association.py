@@ -1,9 +1,10 @@
 """Cosine similarity between two element patterns."""
 
 from .base import PairwiseSimilarity, weighted_dot
+from .confidence import VotedConfidenceMixin
 
 
-class AssociationSimilarity(PairwiseSimilarity):
+class AssociationSimilarity(VotedConfidenceMixin, PairwiseSimilarity):
     """
     Score two samples by the angle between their element vectors.
 
@@ -19,10 +20,13 @@ class AssociationSimilarity(PairwiseSimilarity):
     full range is available. Because the clamp compares against integer bounds,
     an exact match returns integer 1 rather than 1.0, which the envelope coerces
     to a float.
+
+    Confidence comes from VotedConfidenceMixin: how many of the k nearest
+    references (by this same cosine score) share a candidate match's deposit.
     """
 
     id = "association"
-    version = "1.0.0"
+    version = "1.1.0"
     capabilities = frozenset()
 
     def score_vectors(self, prepared):

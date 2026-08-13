@@ -8,6 +8,18 @@ the API, a management command, and the benchmark harness without modification.
 Preprocessing is deliberately not the algorithm's job. Every algorithm is
 handed values that the shared preprocessing head has already transformed, which
 is what makes a benchmark compare algorithms rather than pipelines.
+
+Additions in this version, both additive and safe for algorithms that don't
+opt in:
+  - PairwiseSimilarity.compare() now fills match.confidence for the top
+    detail_top_n matches by calling self.confidence(). The default
+    confidence() (declared below) returns None, so an algorithm that doesn't
+    mix in VotedConfidenceMixin behaves exactly as before. One that does
+    (association, correlation, distance, log_difference) gets it for free
+    instead of duplicating KnnAitchisonSimilarity's copy of the same logic.
+  - A coverage warning: if fewer than half of a sample's requested elements
+    are shared with the reference library, a warning is appended rather than
+    silently returning a score computed from a handful of elements.
 """
 
 from abc import ABC, abstractmethod
@@ -15,6 +27,18 @@ from time import perf_counter
 
 from ..preprocessing import describe, prepare_vectors, resolve_options
 from .envelope import Match, RunResult
+
+#: How many nearest references vote on a match's confidence, when an
+#: algorithm supports it.
+DEFAULT_K = 5
+
+#: Confidence is only computed for this many leading matches — computing it
+#: for a full ranking of every reference would multiply the row size of a
+#: result set that already runs to hundreds of rows per sample.
+DEFAULT_DETAIL_TOP_N = 10
+
+#: Below this fraction of shared elements, a coverage warning is raised.
+MIN_COVERAGE_FRACTION = 0.5
 
 
 def weighted_mean(values, weights=None):
@@ -53,8 +77,8 @@ class SimilarityAlgorithm(ABC):
     One swappable way of scoring an uploaded sample against the reference
     library.
 
-    Adding an algorithm means writing one module and adding one line to the
-    registry. Subclass this directly when the algorithm needs the whole
+    Adding an algorithm means writing one module and adding one line to
+    registry.py. Subclass this directly when the algorithm needs the whole
     reference library in memory at once, for example anything that fits a model
     or builds a projection. Subclass PairwiseSimilarity instead when the
     algorithm scores one reference at a time.
@@ -97,6 +121,8 @@ class SimilarityAlgorithm(ABC):
         Judge one match against the deposits of the nearest references.
 
         None by default, meaning the algorithm offers no calibrated opinion.
+        Mix in algorithms.confidence.VotedConfidenceMixin to opt in without
+        writing this method yourself.
         """
         return None
 
@@ -124,9 +150,9 @@ class PairwiseSimilarity(SimilarityAlgorithm):
     over score_pair() rather than as a matrix operation, and the API can call
     score_pair() directly from inside its existing batch loop.
 
-    A subclass implements score_vectors() only. Alignment, preprocessing, and
-    the empty-overlap case are handled here so that each algorithm is just its
-    own arithmetic.
+    A subclass implements score_vectors() only. Alignment, preprocessing, the
+    empty-overlap case, and confidence (for algorithms that opt in) are handled
+    here so that each algorithm is just its own arithmetic.
     """
 
     def score_pair(
@@ -189,6 +215,8 @@ class PairwiseSimilarity(SimilarityAlgorithm):
         """
         config = config or {}
         top_n = int(config.get("top_n", 200))
+        confidence_k = int(config.get("k", DEFAULT_K))
+        detail_top_n = int(config.get("detail_top_n", DEFAULT_DETAIL_TOP_N))
         # Resolved once here rather than per reference, since validating the
         # policy names on every one of a thousand comparisons is wasted work.
         options = resolve_options(
@@ -205,6 +233,21 @@ class PairwiseSimilarity(SimilarityAlgorithm):
             self._rank_one_sample(sample, reference_list, options, top_n)
             for sample in samples
         ]
+
+        # Confidence for algorithms that opt in via VotedConfidenceMixin.
+        # self.confidence() returns None for everything else, so this loop is
+        # a no-op cost-wise for algorithms that don't implement it.
+        if rankings and rankings[0]:
+            nearest_deposits = [
+                match.deposit_id or match.deposit_name
+                for match in rankings[0][:confidence_k]
+            ]
+            for match in rankings[0][:detail_top_n]:
+                match.confidence = self.confidence(
+                    match.deposit_id or match.deposit_name,
+                    nearest_deposits,
+                )
+
         runtime_ms = (perf_counter() - started) * 1000
 
         # The element suite that was actually compared, not the one requested.
@@ -223,10 +266,20 @@ class PairwiseSimilarity(SimilarityAlgorithm):
         if not reference_list:
             warnings.append("The reference library is empty; no matches were produced.")
 
+        if samples:
+            requested = set(samples[0].get("values") or {})
+            if requested and len(elements_used) < len(requested) * MIN_COVERAGE_FRACTION:
+                warnings.append(
+                    f"Only {len(elements_used)}/{len(requested)} of the sample's "
+                    "elements are shared with the reference library; similarity "
+                    "scores may be unreliable. Check element naming conventions "
+                    "(e.g. 'Au' vs 'Au_ppm')."
+                )
+
         return RunResult(
             algorithm_id=self.id,
             algorithm_version=self.version,
-            algorithm_params={"top_n": top_n},
+            algorithm_params={"top_n": top_n, "k": confidence_k},
             matches=rankings[0] if rankings else [],
             runtime_ms=runtime_ms,
             preprocessing=describe(options, elements_used),

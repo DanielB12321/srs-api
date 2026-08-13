@@ -1,9 +1,10 @@
 """Mean absolute difference across the shared elements."""
 
 from .base import PairwiseSimilarity, weighted_mean
+from .confidence import VotedConfidenceMixin
 
 
-class DistanceSimilarity(PairwiseSimilarity):
+class DistanceSimilarity(VotedConfidenceMixin, PairwiseSimilarity):
     """
     Compare samples on whatever scale preprocessing left them on.
 
@@ -15,13 +16,20 @@ class DistanceSimilarity(PairwiseSimilarity):
     and with CLR it is a per-element Aitchison difference, which is the
     relationship the compositional work builds on.
 
+    resolve_options() defaults log_transform to True, so this only produces the
+    magnitude-dominated behaviour described above if a caller explicitly
+    disables it — that's worth confirming deliberately, not assuming.
+
     Normalisation: the per-element score is 1 / (1 + |difference|), averaged
     over the shared elements. Already bounded to (0, 1] with 1 meaning
     identical, and monotone in the mean absolute difference.
+
+    Confidence comes from VotedConfidenceMixin, same as the other pairwise
+    algorithms.
     """
 
     id = "distance"
-    version = "1.0.0"
+    version = "1.1.0"
     capabilities = frozenset()
 
     def score_vectors(self, prepared):
