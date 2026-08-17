@@ -689,7 +689,7 @@ class FullAnalysisListCreateView(APIView):
                 "sample_count": len(samples),
                 "references_processed": 0,
                 "reference_count": ReferenceSample.objects.count(),
-                "note": "Background batched log-difference similarity.",
+                "note": "Background batched similarity analysis.",
             },
             status=FullAnalysis.STATUS_PENDING,
         )

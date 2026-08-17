@@ -27,6 +27,7 @@ from .distance import DistanceSimilarity
 from .envelope import Evidence, Match, RunResult, SCHEMA_VERSION, validate_envelope
 from .knn_aitchison import KnnAitchisonSimilarity
 from .log_difference import LogDifferenceSimilarity
+from .ml_ensemble import XgbSvmEnsembleSimilarity
 
 # The last-resort default. This one is used when settings name an algorithm
 # that does not exist, so the service still starts on a typo.
@@ -40,6 +41,7 @@ ALGORITHMS = {
         AssociationSimilarity,
         DistanceSimilarity,
         KnnAitchisonSimilarity,
+        XgbSvmEnsembleSimilarity,
     )
 }
 
