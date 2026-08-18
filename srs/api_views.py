@@ -1547,9 +1547,8 @@ class FullAnalysisMapView(FullAnalysisResultView):
     """
     GET /api/full-analysis/<analysis_id>/map/
 
-    Return one map point per analysed sample, scored by that sample's strongest
-    reference-library match. This is derived from saved results on request so
-    it cannot drift from a rerun or from corrected match data.
+    Return every unique reference match, globally ranked by the best similarity
+    it achieved against any analysed sample.
     """
 
     def get(self, request, full_analysis_id):
@@ -1562,50 +1561,66 @@ class FullAnalysisMapView(FullAnalysisResultView):
             )
 
         saved_samples = self.get_saved_samples(full_analysis)
-        best_matches = {
-            match.analysed_sample_index: match
-            for match in (
-                full_analysis.ranked_matches
-                .filter(rank=1)
-                .select_related(
-                    "reference_sample",
-                    "reference_sample__reference_deposit",
-                )
+        # Ordering by score means the first row encountered for a reference is
+        # its best result across all uploaded/analysed samples.
+        best_matches = {}
+        for match in (
+            full_analysis.ranked_matches
+            .exclude(reference_sample_id=None)
+            .select_related(
+                "reference_sample",
+                "reference_sample__reference_deposit",
             )
-        }
-        results = []
-        samples_without_coordinates = 0
+            .order_by("-similarity_score", "rank", "reference_sample_id")
+        ):
+            best_matches.setdefault(match.reference_sample_id, match)
 
-        for sample_index, sample in enumerate(saved_samples):
-            latitude = sample.get("latitude")
-            longitude = sample.get("longitude")
+        globally_ranked = sorted(
+            best_matches.values(),
+            key=lambda match: (-match.similarity_score, match.reference_sample_id),
+        )
+        results = []
+        matches_without_coordinates = 0
+
+        for overall_rank, match in enumerate(globally_ranked, start=1):
+            reference_sample = match.reference_sample
+            deposit = reference_sample.reference_deposit
+            latitude = reference_sample.latitude
+            longitude = reference_sample.longitude
+            if latitude is None and deposit is not None:
+                latitude = deposit.latitude
+            if longitude is None and deposit is not None:
+                longitude = deposit.longitude
             if latitude in (None, "") or longitude in (None, ""):
-                samples_without_coordinates += 1
+                matches_without_coordinates += 1
                 continue
 
-            match = best_matches.get(sample_index)
-            reference_sample = match.reference_sample if match else None
-            deposit = (
-                reference_sample.reference_deposit
-                if reference_sample is not None
-                else None
+            analysed_sample = (
+                saved_samples[match.analysed_sample_index]
+                if match.analysed_sample_index < len(saved_samples)
+                else {}
             )
 
             results.append({
-                "sample_index": sample_index,
-                "sample_code": sample.get("sample_code") or f"Sample {sample_index + 1}",
+                "id": reference_sample.id,
+                "sample_code": reference_sample.sample_code,
+                "deposit_name": deposit.name if deposit else None,
                 "latitude": latitude,
                 "longitude": longitude,
-                "best_similarity_score": match.similarity_score if match else None,
-                "best_reference_sample_id": reference_sample.id if reference_sample else None,
-                "best_reference_sample_code": reference_sample.sample_code if reference_sample else None,
-                "best_deposit_name": deposit.name if deposit else None,
+                "overall_rank": overall_rank,
+                "overall_similarity_score": match.similarity_score,
+                "best_analysed_sample_index": match.analysed_sample_index,
+                "best_analysed_sample_code": (
+                    analysed_sample.get("sample_code")
+                    or f"Sample {match.analysed_sample_index + 1}"
+                ),
             })
 
         return Response({
             "full_analysis_id": full_analysis.id,
             "count": len(results),
-            "samples_without_coordinates": samples_without_coordinates,
-            "score_method": "maximum ranked-match similarity per analysed sample",
+            "total_ranked_matches": len(globally_ranked),
+            "matches_without_coordinates": matches_without_coordinates,
+            "score_method": "maximum similarity per reference across all analysed samples",
             "results": results,
         })
