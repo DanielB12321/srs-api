@@ -1610,6 +1610,7 @@ class FullAnalysisMapView(FullAnalysisResultView):
                 "overall_rank": overall_rank,
                 "overall_similarity_score": match.similarity_score,
                 "best_analysed_sample_index": match.analysed_sample_index,
+                "best_analysed_sample_rank": match.rank,
                 "best_analysed_sample_code": (
                     analysed_sample.get("sample_code")
                     or f"Sample {match.analysed_sample_index + 1}"
