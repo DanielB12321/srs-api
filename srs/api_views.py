@@ -610,13 +610,20 @@ class FullAnalysisListCreateView(APIView):
         )
         preprocessing = request.data.get("preprocessing") or {}
 
-        try:
-            top_n = int(request.data.get("top_n", 200))
-        except (TypeError, ValueError):
-            return Response(
-                {"error": "top_n must be an integer."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        requested_top_n = request.data.get("top_n", 200)
+        if str(requested_top_n).strip().lower() == "all":
+            # Persist the complete ranking while result retrieval remains
+            # paginated. Resolve this to a number now so the background worker
+            # sees a stable limit for the reference-library snapshot it runs.
+            top_n = ReferenceSample.objects.count()
+        else:
+            try:
+                top_n = int(requested_top_n)
+            except (TypeError, ValueError):
+                return Response(
+                    {"error": "top_n must be an integer or 'all'."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         raw_samples = request.data.get("samples")
 
@@ -1532,5 +1539,73 @@ class FullAnalysisSampleMapView(FullAnalysisResultView):
             "sample_index": sample_index,
             "sample_code": sample.get("sample_code"),
             "count": len(results),
+            "results": results,
+        })
+
+
+class FullAnalysisMapView(FullAnalysisResultView):
+    """
+    GET /api/full-analysis/<analysis_id>/map/
+
+    Return one map point per analysed sample, scored by that sample's strongest
+    reference-library match. This is derived from saved results on request so
+    it cannot drift from a rerun or from corrected match data.
+    """
+
+    def get(self, request, full_analysis_id):
+        try:
+            full_analysis = FullAnalysis.objects.get(id=full_analysis_id)
+        except FullAnalysis.DoesNotExist:
+            return Response(
+                {"error": f"Full analysis {full_analysis_id} was not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        saved_samples = self.get_saved_samples(full_analysis)
+        best_matches = {
+            match.analysed_sample_index: match
+            for match in (
+                full_analysis.ranked_matches
+                .filter(rank=1)
+                .select_related(
+                    "reference_sample",
+                    "reference_sample__reference_deposit",
+                )
+            )
+        }
+        results = []
+        samples_without_coordinates = 0
+
+        for sample_index, sample in enumerate(saved_samples):
+            latitude = sample.get("latitude")
+            longitude = sample.get("longitude")
+            if latitude in (None, "") or longitude in (None, ""):
+                samples_without_coordinates += 1
+                continue
+
+            match = best_matches.get(sample_index)
+            reference_sample = match.reference_sample if match else None
+            deposit = (
+                reference_sample.reference_deposit
+                if reference_sample is not None
+                else None
+            )
+
+            results.append({
+                "sample_index": sample_index,
+                "sample_code": sample.get("sample_code") or f"Sample {sample_index + 1}",
+                "latitude": latitude,
+                "longitude": longitude,
+                "best_similarity_score": match.similarity_score if match else None,
+                "best_reference_sample_id": reference_sample.id if reference_sample else None,
+                "best_reference_sample_code": reference_sample.sample_code if reference_sample else None,
+                "best_deposit_name": deposit.name if deposit else None,
+            })
+
+        return Response({
+            "full_analysis_id": full_analysis.id,
+            "count": len(results),
+            "samples_without_coordinates": samples_without_coordinates,
+            "score_method": "maximum ranked-match similarity per analysed sample",
             "results": results,
         })

@@ -10,6 +10,7 @@ from .api_views import (
     FullAnalysisResultView,
     FullAnalysisSampleResultView,
     FullAnalysisSampleMapView,
+    FullAnalysisMapView,
     SimilarityAlgorithmListView,
 )
 from .views import (
@@ -49,6 +50,10 @@ urlpatterns = [
 
     path("full-analysis/", FullAnalysisListCreateView.as_view()),
     path("full-analysis/<int:full_analysis_id>/", FullAnalysisResultView.as_view()),
+    path(
+        "full-analysis/<int:full_analysis_id>/map/",
+        FullAnalysisMapView.as_view(),
+    ),
     path(
         "full-analysis/<int:full_analysis_id>/samples/<int:sample_index>/",
         FullAnalysisSampleResultView.as_view(),
