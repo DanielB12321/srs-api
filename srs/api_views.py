@@ -578,7 +578,7 @@ class FullAnalysisListCreateView(APIView):
             except (json.JSONDecodeError, TypeError):
                 parameters = {}
 
-        samples = sample_data.get("samples") or []
+        samples = sample_data.get("samples") or [] #a
 
         return {
             "id": full_analysis.id,
