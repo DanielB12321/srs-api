@@ -174,12 +174,22 @@ SRS_DEFAULT_ALGORITHM = os.environ.get(
     "log_difference_similarity",
 )
 
+# Secret used only for server-to-server calls from the SRS website. There is
+# deliberately no development fallback: an omitted value keeps the API closed.
+SRS_API_SHARED_KEY = os.environ.get("SRS_API_SHARED_KEY", "")
+
 CORS_ALLOWED_ORIGINS = os.environ.get(
     "CORS_ALLOWED_ORIGINS",
     "http://127.0.0.1:8000,http://localhost:8000"
 ).split(",")
 
 REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'srs.authentication.SRSSharedKeyAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_PAGINATION_CLASS':
         'rest_framework.pagination.PageNumberPagination',

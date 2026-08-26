@@ -7,7 +7,7 @@ that a new key appears in a response the frontend already parses. So the shape
 of the existing responses is asserted directly, key by key.
 """
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from ..api_views import FullAnalysisListCreateView, reference_library_version
 from ..models import (
@@ -32,10 +32,12 @@ SUMMARY_KEYS = {
 MATCH_KEYS = {"id", "rank", "similarity_score"}
 
 
+@override_settings(SRS_API_SHARED_KEY="test-shared-key")
 class PersistenceTestCase(TestCase):
     """Shared fixture: a small library with deposits, so confidence has data."""
 
     def setUp(self):
+        self.client.defaults["HTTP_X_SRS_API_KEY"] = "test-shared-key"
         self.view = FullAnalysisListCreateView()
         self.elements = {
             symbol: Element.objects.create(symbol=symbol)

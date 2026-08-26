@@ -53,6 +53,7 @@ class ReferenceImportUploadSerializer(serializers.ModelSerializer):
             "uploaded_by_id",
             "uploaded_by_email",
         )
+        read_only_fields = ("uploaded_by_id", "uploaded_by_email")
 
 class ElementSerializer(serializers.ModelSerializer):
     class Meta:
@@ -134,6 +135,8 @@ class DatasetSerializer(serializers.ModelSerializer):
             "completed_at",
             "created_at",
             "updated_at",
+            "uploaded_by_id",
+            "uploaded_by_email",
         ]
 
 class DatasetUploadSerializer(serializers.ModelSerializer):
@@ -148,6 +151,7 @@ class DatasetUploadSerializer(serializers.ModelSerializer):
             "uploaded_by_id",
             "uploaded_by_email",
         ]
+        read_only_fields = ["uploaded_by_id", "uploaded_by_email"]
 
 class SampleSerializer(serializers.ModelSerializer):
     class Meta:

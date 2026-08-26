@@ -35,6 +35,7 @@ from .preprocessing import (
     resolve_options,
 )
 from .services.units import concentration_to_ppm
+from .authentication import caller_audit_fields
 
 from math import ceil
 
@@ -133,6 +134,11 @@ class ReferenceImportViewSet(viewsets.ModelViewSet):
                 data_sha256=data_hash,
                 metadata_sha256=metadata_hash,
                 status=ReferenceImport.STATUS_PENDING,
+                **caller_audit_fields(
+                    request,
+                    "uploaded_by_id",
+                    "uploaded_by_email",
+                ),
             )
 
         threading.Thread(target=run_import, args=[import_row.id], daemon=True).start()
@@ -193,6 +199,11 @@ class DatasetViewSet(viewsets.ModelViewSet):
                 original_filename=uploaded_file.name,
                 file_sha256=file_hash,
                 status=Dataset.STATUS_PENDING,
+                **caller_audit_fields(
+                    request,
+                    "uploaded_by_id",
+                    "uploaded_by_email",
+                ),
             )
 
         try:
@@ -699,6 +710,11 @@ class FullAnalysisListCreateView(APIView):
                 "note": "Background batched similarity analysis.",
             },
             status=FullAnalysis.STATUS_PENDING,
+            **caller_audit_fields(
+                request,
+                "created_by_id",
+                "created_by_email",
+            ),
         )
 
         # Return immediately instead of holding an HTTP request open for the
