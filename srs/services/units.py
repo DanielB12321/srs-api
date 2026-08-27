@@ -1,7 +1,9 @@
-"""Concentration-unit conversion helpers used by similarity analysis."""
+"""Convert supported concentration units to parts per million."""
+
+from math import isfinite
 
 
-# Every supported factor converts the submitted value to parts per million.
+# Each factor converts the supplied value to ppm.
 _TO_PPM_FACTORS = {
     "": 1.0,
     "ppm": 1.0,
@@ -32,16 +34,14 @@ def concentration_to_ppm(value, unit):
     """
     Convert a supported concentration to ppm.
 
-    Return None for missing, non-positive, non-numeric, or unsupported values.
-    Unsupported units are excluded rather than silently compared on the wrong
-    scale.
+    Invalid values and unsupported units return ``None``.
     """
     try:
         numeric_value = float(value)
     except (TypeError, ValueError):
         return None
 
-    if numeric_value <= 0:
+    if not isfinite(numeric_value) or numeric_value <= 0:
         return None
 
     normalised_unit = str(unit or "").strip().lower().replace(" ", "")
@@ -49,4 +49,5 @@ def concentration_to_ppm(value, unit):
     if factor is None:
         return None
 
-    return numeric_value * factor
+    converted = numeric_value * factor
+    return converted if isfinite(converted) else None

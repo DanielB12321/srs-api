@@ -20,13 +20,12 @@ USER_EMAIL_HEADER = "X-SRS-User-Email"
 
 @dataclass(frozen=True)
 class SRSServiceCaller:
-    """The trusted website making the request and its optional current user."""
+    """Authenticated SRS website caller with optional audit details."""
 
     user_id: int | None = None
     email: str = ""
 
-    # DRF's IsAuthenticated permission checks this property. Authentication is
-    # provided by the server key; user details are only audit information.
+    # The shared key authenticates the caller; these fields satisfy DRF.
     is_authenticated: bool = True
     is_active: bool = True
     is_staff: bool = False
@@ -48,13 +47,7 @@ class SRSServiceCaller:
 
 
 class SRSSharedKeyAuthentication(BaseAuthentication):
-    """
-    Authenticate the SRS website with a secret shared by the two servers.
-
-    The optional user headers are accepted only after the key is verified.
-    They identify who initiated a change for auditing; they never restrict
-    which shared SRS records the caller can access.
-    """
+    """Authenticate calls using the key shared with the SRS website."""
 
     def authenticate(self, request):
         expected_key = getattr(settings, "SRS_API_SHARED_KEY", "")
@@ -73,8 +66,7 @@ class SRSSharedKeyAuthentication(BaseAuthentication):
         return self._build_caller(request), None
 
     def authenticate_header(self, request):
-        # Returning a challenge makes failed authentication a 401 rather than
-        # a 403, which is clearer for a server configuration problem.
+        # A challenge makes failed authentication return 401 instead of 403.
         return 'ApiKey realm="srs-api"'
 
     def _build_caller(self, request):

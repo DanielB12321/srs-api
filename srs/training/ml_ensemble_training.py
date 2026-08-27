@@ -1,10 +1,4 @@
-"""Offline training utilities for the SRS XGBoost + RBF-SVM ensemble.
-
-Training uses the same ``prepare_vectors`` / ``resolve_options`` head used by
-production similarity algorithms. Deposits are grouped during both model
-selection and final evaluation to avoid samples from one deposit appearing on
-both sides of a split.
-"""
+"""Offline training for the XGBoost and SVM similarity ensemble."""
 
 from __future__ import annotations
 
@@ -66,6 +60,7 @@ XGB_WEIGHTS = [0.0, 0.20, 0.40, 0.50, 0.60, 0.80, 1.0]
 
 
 def load_data(path: Path, sheet_name: str | None = None) -> pd.DataFrame:
+    """Load a CSV or Excel training file and clean its class labels."""
     if not path.exists():
         raise FileNotFoundError(f"Training dataset not found: {path}")
 
@@ -82,6 +77,7 @@ def load_data(path: Path, sheet_name: str | None = None) -> pd.DataFrame:
 
 
 def clean_labels(dataframe: pd.DataFrame) -> pd.DataFrame:
+    """Remove incomplete labels and classes with too little training data."""
     required = {TARGET_COLUMN, GROUP_COLUMN, DEPOSIT_NAME_COLUMN}
     missing = required.difference(dataframe.columns)
     if missing:
@@ -114,6 +110,7 @@ def clean_labels(dataframe: pd.DataFrame) -> pd.DataFrame:
 
 
 def identify_elements(dataframe: pd.DataFrame) -> list[str]:
+    """Return columns containing usable numeric element values."""
     elements: list[str] = []
     for column in dataframe.columns:
         if column in NON_FEATURE_COLUMNS:
@@ -129,6 +126,7 @@ def identify_elements(dataframe: pd.DataFrame) -> list[str]:
 
 
 def row_values(row: pd.Series, elements: list[str]) -> dict[str, float]:
+    """Extract the available element values from one training row."""
     values: dict[str, float] = {}
     for element in elements:
         value = row[element]
@@ -207,6 +205,7 @@ def pair_matrix(
     elements: list[str],
     options: dict,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Build model features and targets for a list of sample pairs."""
     rows: list[np.ndarray] = []
     targets: list[int] = []
 
@@ -249,6 +248,7 @@ def pair_matrix(
 def make_final_split(
     dataframe: pd.DataFrame,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Create a final test split with no deposit shared with development data."""
     labels = dataframe[TARGET_COLUMN].astype(str).to_numpy()
     groups = dataframe[GROUP_COLUMN].astype(str).to_numpy()
 
@@ -269,6 +269,7 @@ def make_final_split(
 
 
 def create_xgb_model() -> XGBClassifier:
+    """Create the XGBoost model used for each fold and the final fit."""
     return XGBClassifier(
         objective="binary:logistic",
         n_estimators=900,
@@ -288,6 +289,7 @@ def create_xgb_model() -> XGBClassifier:
 
 
 def create_svm_pipeline(parameters: dict) -> Pipeline:
+    """Create the scaled RBF-SVM pipeline for one parameter set."""
     return Pipeline(
         [
             ("scale", StandardScaler()),
@@ -307,6 +309,7 @@ def create_svm_pipeline(parameters: dict) -> Pipeline:
 
 
 def calculate_metrics(y_true: np.ndarray, probabilities: np.ndarray) -> dict[str, float]:
+    """Calculate binary classification metrics at a 0.5 threshold."""
     predictions = (probabilities >= 0.5).astype(int)
     result = {
         "accuracy": float(accuracy_score(y_true, predictions)),
@@ -326,6 +329,7 @@ def run_grouped_cross_validation(
     elements: list[str],
     options: dict,
 ) -> tuple[dict, pd.DataFrame, pd.DataFrame]:
+    """Select SVM settings and ensemble weights using deposit-grouped folds."""
     development = dataframe.iloc[development_indices]
     development_labels = development[TARGET_COLUMN].astype(str).to_numpy()
     development_groups = development[GROUP_COLUMN].astype(str).to_numpy()
@@ -443,6 +447,7 @@ def fit_final_models(
     options: dict,
     selected: dict,
 ):
+    """Fit both models on development data and evaluate the held-out split."""
     development_rng = np.random.default_rng(RANDOM_STATE + 500)
     final_rng = np.random.default_rng(RANDOM_STATE + 600)
 
@@ -487,6 +492,7 @@ def train_from_file(
     sheet_name: str | None = None,
     preprocessing_request: dict | None = None,
 ) -> dict:
+    """Train the ensemble and write its models, metrics and manifest."""
     dataframe = load_data(input_path, sheet_name)
     elements = identify_elements(dataframe)
 

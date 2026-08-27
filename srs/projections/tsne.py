@@ -1,26 +1,13 @@
-"""
-t-SNE in pure Python, for offline exploration of the reference library.
+"""Offline t-SNE projection of the reference library."""
 
-This is deliberately not on the request path. It costs minutes rather than the
-fraction of a second PCA costs, and more importantly it has no out-of-sample
-extension: placing one newly uploaded sample would mean recomputing the entire
-embedding. Use it to look at how the library's own deposit classes separate,
-and use PCA when a user's sample has to appear on the plot.
-
-The implementation is the standard one: match a probability distribution over
-neighbours in the high-dimensional space with one in two dimensions, minimising
-the Kullback-Leibler divergence between them by gradient descent.
-"""
-
-from math import exp, log, sqrt
+from math import exp, log
 import random
 
 DEFAULT_PERPLEXITY = 30.0
 DEFAULT_ITERATIONS = 500
 DEFAULT_LEARNING_RATE = 200.0
 
-# The first iterations run with the affinities exaggerated, which pushes
-# clusters apart early and leaves room between them for the rest of the run.
+# Early exaggeration separates clusters before the normal optimisation stage.
 _EARLY_EXAGGERATION = 4.0
 _EARLY_ITERATIONS = 100
 
@@ -89,8 +76,7 @@ def _joint_probabilities(vectors, perplexity):
             position += 1
         conditional.append(full)
 
-    # Symmetrise, so the affinity between two points does not depend on which
-    # of them is doing the looking.
+    # Make the affinity between each pair symmetric.
     joint = [[0.0] * n for _ in range(n)]
     scale = 2 * n
     for i in range(n):
@@ -108,12 +94,7 @@ def fit_tsne(
     seed=7,
     progress=None,
 ):
-    """
-    Embed high-dimensional vectors into two dimensions.
-
-    Returns a list of [x, y] pairs in the order given. Seeded so a rerun over
-    an unchanged library reproduces the same picture.
-    """
+    """Return seeded two-dimensional positions in input order."""
     n = len(vectors)
     if n < 3:
         return [[0.0, 0.0] for _ in range(n)]
@@ -163,8 +144,7 @@ def fit_tsne(
 
         for i in range(n):
             for axis in range(2):
-                # Gains rise where the gradient keeps its sign and fall where
-                # it oscillates, which is the usual t-SNE step-size heuristic.
+                # Adjust each step size when the gradient direction changes.
                 if (gradient[i][axis] > 0) != (velocity[i][axis] > 0):
                     gains[i][axis] += 0.2
                 else:

@@ -1,15 +1,4 @@
-"""
-Tests for the compositional algorithm.
-
-The envelope contract is already enforced for every registered algorithm by
-test_algorithms.py, so these check what is specific to this one: that it really
-behaves compositionally, that the two reported metrics measure different
-things, and that the evidence decomposition adds up.
-
-Compositional properties are asserted directly rather than by pinning numbers,
-because "distance is unchanged when a sample is diluted" is the actual claim
-being made. A pinned float would still pass if the property broke.
-"""
+"""Tests for Aitchison similarity, evidence and confidence."""
 
 from math import sqrt
 
@@ -21,7 +10,7 @@ from ..algorithms.knn_aitchison import (
     KnnAitchisonSimilarity,
     _average_ranks,
 )
-from ..preprocessing import prepare_vectors, resolve_options
+from ..preprocessing import SELECTED_BOOST, prepare_vectors, resolve_options
 
 SAMPLE_VALUES = {"Cu": 100.0, "Zn": 10.0, "Au": 1.0}
 ELEMENTS = set(SAMPLE_VALUES)
@@ -38,7 +27,7 @@ def prepared(input_values, reference_values, preprocessing=None, imputed=None):
 
 
 class CompositionalBehaviourTests(SimpleTestCase):
-    """The properties that justify using this algorithm at all."""
+    """Check the compositional behaviour of the score."""
 
     def setUp(self):
         self.algorithm = KnnAitchisonSimilarity()
@@ -52,11 +41,6 @@ class CompositionalBehaviourTests(SimpleTestCase):
         self.assertAlmostEqual(self.score(dict(SAMPLE_VALUES)), 1.0, places=12)
 
     def test_dilution_does_not_change_the_result(self):
-        """
-        The defining property. A sample at a tenth the concentration throughout
-        is the same composition, so it must be indistinguishable from the
-        original. This is what concentration-based methods get wrong.
-        """
         diluted = {symbol: value / 10 for symbol, value in SAMPLE_VALUES.items()}
         concentrated = {symbol: value * 1000 for symbol, value in SAMPLE_VALUES.items()}
 
@@ -64,15 +48,10 @@ class CompositionalBehaviourTests(SimpleTestCase):
         self.assertAlmostEqual(self.score(concentrated), 1.0, places=12)
 
     def test_a_changed_ratio_does_change_the_result(self):
-        """Dilution invariance would be worthless if it ignored everything."""
         self.assertLess(self.score({"Cu": 1000.0, "Zn": 10.0, "Au": 1.0}), 1.0)
 
     def test_the_result_is_the_same_whatever_preprocessing_selected(self):
-        """
-        The user picks algorithm and preprocessing independently, so this
-        applies the CLR itself when the request did not. All three routes must
-        arrive at the same place.
-        """
+        """Ensure CLR is applied once regardless of preprocessing choice."""
         reference = {"Cu": 1000.0, "Zn": 10.0, "Au": 1.0}
         raw = self.score(reference)
         logged = self.score(reference, {"log_transform": True})
@@ -82,19 +61,13 @@ class CompositionalBehaviourTests(SimpleTestCase):
         self.assertAlmostEqual(raw, clr, places=12)
 
     def test_similarity_falls_as_distance_grows(self):
-        """The squashing is monotone, so ranking follows the distance."""
         closer = self.score({"Cu": 200.0, "Zn": 10.0, "Au": 1.0})
         further = self.score({"Cu": 10000.0, "Zn": 10.0, "Au": 1.0})
 
         self.assertGreater(closer, further)
 
     def test_similarity_is_exactly_the_documented_squashing_of_the_distance(self):
-        """
-        Ties the two reported numbers together. Without this, the similarity
-        and the aitchison_distance in the same scores block could drift apart
-        and every other test here would still pass, because monotonicity and
-        the identical-composition case hold for any 1 / (1 + c * distance).
-        """
+        """Keep similarity consistent with the reported distance."""
         for reference in (
             {"Cu": 1000.0, "Zn": 10.0, "Au": 1.0},
             {"Cu": 10.0, "Zn": 100.0, "Au": 1.0},
@@ -123,7 +96,7 @@ class CompositionalBehaviourTests(SimpleTestCase):
 
 
 class RawMetricTests(SimpleTestCase):
-    """Aitchison distance and Spearman rho answer different questions."""
+    """Check the distance and Spearman metrics."""
 
     def setUp(self):
         self.algorithm = KnnAitchisonSimilarity()
@@ -158,10 +131,6 @@ class RawMetricTests(SimpleTestCase):
         )
 
     def test_a_pair_can_be_distant_yet_perfectly_rank_correlated(self):
-        """
-        Why both metrics are worth reporting. This reference orders its
-        elements exactly as the sample does, but sits far away in composition.
-        """
         metrics = self.metrics({"Cu": 1e6, "Zn": 10.0, "Au": 1e-6})
 
         self.assertAlmostEqual(metrics["spearman_rho"], 1.0, places=12)
@@ -174,7 +143,7 @@ class RawMetricTests(SimpleTestCase):
 
 
 class EvidenceTests(SimpleTestCase):
-    """The per-element decomposition of the distance."""
+    """Check per-element supporting and conflicting evidence."""
 
     def setUp(self):
         self.algorithm = KnnAitchisonSimilarity()
@@ -218,7 +187,6 @@ class EvidenceTests(SimpleTestCase):
             self.assertAlmostEqual(entry.contribution, 0.0, places=12)
 
     def test_the_imputed_flag_is_carried_through_from_the_mask(self):
-        """Rule 3's imputed flag, from the preprocessing mask and nowhere else."""
         supporting, conflicting = self.algorithm.evidence(
             prepared(
                 SAMPLE_VALUES,
@@ -234,9 +202,46 @@ class EvidenceTests(SimpleTestCase):
         self.assertTrue(by_element["Cu"].imputed)
         self.assertFalse(by_element["Zn"].imputed)
 
+    def test_selected_element_weights_are_used_in_evidence(self):
+        options = resolve_options(
+            {"weighting_mode": SELECTED_BOOST},
+            ["Au"],
+        )
+        vectors = prepare_vectors(
+            SAMPLE_VALUES,
+            {"Cu": 1000.0, "Zn": 10.0, "Au": 1.0},
+            ELEMENTS,
+            options,
+        )
+        supporting, conflicting = self.algorithm.evidence(vectors)
+        actual = {
+            entry.element: entry.contribution
+            for entry in supporting + conflicting
+        }
+
+        left, right = self.algorithm._clr_pair(vectors)
+        weighted_squared = [
+            weight * (left_value - right_value) ** 2
+            for weight, left_value, right_value in zip(
+                vectors.weights,
+                left,
+                right,
+            )
+        ]
+        mean_squared = sum(weighted_squared) / len(weighted_squared)
+        raw = [mean_squared - value for value in weighted_squared]
+        total = sum(abs(value) for value in raw)
+        expected = {
+            symbol: value / total
+            for symbol, value in zip(vectors.symbols, raw)
+        }
+
+        for symbol in vectors.symbols:
+            self.assertAlmostEqual(actual[symbol], expected[symbol], places=12)
+
 
 class KnnConfidenceAndEnvelopeTests(SimpleTestCase):
-    """The kNN part: judging a match by the company it keeps."""
+    """Check nearest-neighbour confidence and result details."""
 
     def references(self):
         # Three samples from one deposit and one from another, so the nearest
@@ -270,10 +275,6 @@ class KnnConfidenceAndEnvelopeTests(SimpleTestCase):
         self.assertIn("spearman_rho", scores)
 
     def test_a_match_backed_by_its_neighbours_is_reported_as_confident(self):
-        """
-        Three of the four references come from Woodlawn and all sit close, so
-        the top match should be well supported.
-        """
         top = self.envelope()["matches"][0]
 
         self.assertEqual(top["deposit_id"], "WLN")
@@ -317,10 +318,6 @@ class KnnConfidenceAndEnvelopeTests(SimpleTestCase):
             self.assertEqual(set(entry), {"element", "contribution", "imputed"})
 
     def test_detail_is_limited_to_the_requested_number_of_matches(self):
-        """
-        Evidence multiplies the size of a result set that already runs to
-        hundreds of rows, so it is attached to the leading matches only.
-        """
         envelope = self.envelope({"top_n": 10, "detail_top_n": 2})
         matches = envelope["matches"]
 
@@ -331,7 +328,6 @@ class KnnConfidenceAndEnvelopeTests(SimpleTestCase):
         self.assertNotIn("confidence", matches[2])
 
     def test_the_algorithm_declares_the_evidence_capability(self):
-        """Consumers render optional blocks based on this declaration."""
         self.assertIn("evidence", get_algorithm("knn_aitchison").capabilities)
 
     def test_the_declared_capabilities_match_what_is_actually_produced(self):

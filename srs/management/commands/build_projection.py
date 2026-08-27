@@ -46,8 +46,7 @@ class Command(BaseCommand):
 
         limit = options["max_samples"]
         if limit and limit < len(signatures):
-            # Evenly spaced rather than random, so every deposit class keeps
-            # roughly its share of the sample.
+            # Even spacing gives the same subset on every run.
             step = len(signatures) / limit
             signatures = [signatures[int(index * step)] for index in range(limit)]
 

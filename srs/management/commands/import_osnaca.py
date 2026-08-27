@@ -1,24 +1,13 @@
-"""
-Import an OSNACA workbook pair from the command line.
+"""Import an OSNACA workbook pair from the command line."""
 
-Usage:
-    # New import from local files
-    python manage.py import_osnaca \
-        --data ./OSNACA-Data-1.xlsx \
-        --metadata ./OSNACA-Metadata-1.xlsx \
-        --source-name "OSNACA v1"
-
-    # Re-run an existing import (the files are already stored on disk)
-    python manage.py import_osnaca --rerun 7
-"""
 import hashlib
 from pathlib import Path
 
 from django.core.files import File
 from django.core.management.base import BaseCommand, CommandError
 
-from srs.importers import run_import
-from srs.models import ReferenceImport
+from ...importers import run_import
+from ...models import ReferenceImport
 
 
 class Command(BaseCommand):
@@ -42,15 +31,14 @@ class Command(BaseCommand):
         else:
             self._fresh(options)
 
-
     def _fresh(self, options):
         data_path: Path = options["data"]
         meta_path: Path = options["metadata"]
         if not data_path or not meta_path:
             raise CommandError("--data and --metadata are required (or use --rerun).")
-        if not data_path.exists():
+        if not data_path.is_file():
             raise CommandError(f"Data file not found: {data_path}")
-        if not meta_path.exists():
+        if not meta_path.is_file():
             raise CommandError(f"Metadata file not found: {meta_path}")
 
         data_hash = _sha256_of_file(data_path)
@@ -91,14 +79,18 @@ class Command(BaseCommand):
 
     def _run(self, import_id: int) -> None:
         import_row = run_import(import_id)
-        style = self.style.SUCCESS if import_row.status == "completed" else self.style.ERROR
-        self.stdout.write(style(
-            f"Import #{import_row.id} finished: status={import_row.status} "
-            f"stats={import_row.stats}"
+        if import_row.status != ReferenceImport.STATUS_COMPLETED:
+            error_count = len(import_row.errors or [])
+            raise CommandError(
+                f"Import #{import_row.id} failed with {error_count} recorded error(s)."
+            )
+
+        self.stdout.write(self.style.SUCCESS(
+            f"Import #{import_row.id} completed: stats={import_row.stats}"
         ))
         if import_row.errors:
             self.stdout.write(self.style.WARNING(
-                f"  {len(import_row.errors)} warnings/errors recorded."
+                f"  {len(import_row.errors)} warning(s) recorded."
             ))
 
 

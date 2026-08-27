@@ -1,24 +1,7 @@
-"""
-Leave-one-out evaluation of any registered similarity algorithm.
+"""Leave-one-out evaluation for registered similarity algorithms.
 
-The harness reads nothing but the ranked matches an algorithm returns, so it
-scores a compositional algorithm, a correlation algorithm, and anything added
-later through exactly the same code path. Nothing here knows how a similarity
-was arrived at.
-
-Two protocols, and the difference between them matters more than any single
-number:
-
-* Leave one sample out hides only the query sample. Other samples from the same
-  deposit stay in the library, and they are usually near-duplicates of it, so
-  the score this produces is optimistic.
-* Leave one deposit out hides every sample from the query's deposit. The
-  algorithm has to recognise the deposit type from a different deposit
-  entirely, which is the question a user is actually asking.
-
-Report the deposit-out figure. The sample-out figure is useful only as the
-gap between them, which tells you how much of the apparent accuracy was
-sister samples.
+Sample-out removes the query sample. Deposit-out removes every reference from
+the query deposit and gives a stricter measure of deposit-class retrieval.
 """
 
 from collections import Counter
@@ -32,9 +15,7 @@ LEAVE_ONE_SAMPLE_OUT = "sample"
 LEAVE_ONE_DEPOSIT_OUT = "deposit"
 PROTOCOLS = (LEAVE_ONE_SAMPLE_OUT, LEAVE_ONE_DEPOSIT_OUT)
 
-#: Which field on the deposit carries the class label being retrieved.
-#: deposit_type is the only populated label with a join path to a deposit;
-#: DepositClassification exists but nothing links it to ReferenceDeposit.
+# Field used as the target class during evaluation.
 DEFAULT_CLASS_FIELD = "deposit_type"
 
 
@@ -56,7 +37,7 @@ class BenchmarkResult:
 
     @property
     def lift_over_baseline(self):
-        """How much better than always guessing the commonest class."""
+        """Return the top-1 improvement over the majority baseline."""
         return self.top_1 - self.majority_baseline
 
     def to_dict(self):
@@ -82,9 +63,8 @@ def load_signatures(preprocessing=None, class_field=DEFAULT_CLASS_FIELD):
     """
     Read the reference library into the plain dicts an algorithm expects.
 
-    Imported here rather than at module scope so the harness can be imported
-    without Django models being ready, which keeps it usable from a plain
-    script as well as a management command.
+    The model import stays inside this function so Django can finish setup
+    before the query is built.
     """
     from ..models import ReferenceSample
 
@@ -105,8 +85,7 @@ def load_signatures(preprocessing=None, class_field=DEFAULT_CLASS_FIELD):
 
         label = (getattr(deposit, class_field, "") or "").strip()
         if not label:
-            # A sample with no class cannot be scored as a retrieval hit, and
-            # leaving it in the library would let it displace one that can.
+            # Unlabelled samples cannot be scored as retrieval hits.
             continue
 
         values, imputed = extract_values(reference_sample.measurements.all(), options)
@@ -130,8 +109,7 @@ def majority_class_baseline(signatures):
     """
     The score from always guessing the commonest class.
 
-    An algorithm that cannot beat this has learned nothing, whatever its
-    absolute accuracy looks like.
+    This gives the accuracy of always selecting the most common class.
     """
     if not signatures:
         return 0.0
@@ -143,9 +121,7 @@ def majority_class_baseline(signatures):
 def _library_for(query, signatures, protocol):
     """Return the references a query is allowed to be matched against."""
     if protocol == LEAVE_ONE_DEPOSIT_OUT:
-        # Every sample from the query's deposit is withheld, not just the query
-        # itself. Sister samples from one deposit are near-duplicates, and
-        # leaving them in is the single easiest way to overstate accuracy.
+        # Withhold every sample belonging to the query deposit.
         return [
             signature
             for signature in signatures
@@ -181,8 +157,7 @@ def run_benchmark(
 
     queries = list(signatures)
     if max_queries is not None and max_queries < len(queries):
-        # Seeded so a comparison between algorithms is not also a comparison
-        # between two different random query sets.
+        # A fixed seed gives each algorithm the same query subset.
         queries = random.Random(seed).sample(queries, max_queries)
 
     baseline = majority_class_baseline(signatures)
@@ -200,8 +175,7 @@ def run_benchmark(
         if not library:
             continue
 
-        # compare() is the only interface used, which is what lets this score
-        # an algorithm it has never heard of.
+        # All registered algorithms use the same compare interface.
         result = algorithm.compare(
             [{"sample_code": str(query["id"]), "values": query["values"],
               "imputed": query["imputed"]}],

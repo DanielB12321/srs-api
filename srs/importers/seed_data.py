@@ -1,11 +1,4 @@
-"""
-Static reference data for the importer.
-
-Populates the Element table on first run. Units follow OSNACA convention:
-  - g/t for precious metals (Au, Ag, PGEs)
-  - %   for major rock-forming elements
-  - ppm for everything else
-"""
+"""Element definitions and header mappings used by the OSNACA importer."""
 
 GRAMS_PER_TONNE = "g/t"
 PERCENT = "%"
@@ -87,12 +80,11 @@ ELEMENTS = [
 ]
 
 
-# Columns in the Data sheet that are NOT element measurements
+# Data-sheet columns that are not element measurements.
 NON_ELEMENT_COLUMNS = {"Sample", "Code", "Code Tester", "LOI", "Wt Tot"}
 
 
-# Maps composite headers (row1 + row2) to (element_symbol, analytical_method)
-# Used by the importer to split "Au (FA)" vs "Au (AR)" into two methods on Au.
+# Map composite headers to an element symbol and analytical method.
 ELEMENT_METHOD_OVERRIDES = {
     ("AU1", "Au (FA)"): ("Au", "FA"),
     ("Au AR", "Au (AR)"): ("Au", "AR"),

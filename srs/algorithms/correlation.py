@@ -5,18 +5,10 @@ from .log_difference import LogDifferenceSimilarity
 
 
 class CorrelationSimilarity(PairwiseSimilarity):
-    """
-    Score how similarly two samples rise and fall across their shared elements.
+    """Compare shared element patterns using Pearson correlation.
 
-    This measures pattern rather than magnitude. Two samples enriched in the
-    same elements score highly even when one is ten times more concentrated
-    throughout, which suits comparing an ore sample with a weaker halo sample
-    from the same system.
-
-    Normalisation: Pearson's r runs from -1 to 1 and is mapped with (1 + r) / 2,
-    a monotone transform onto [0, 1], so 0.5 means uncorrelated rather than
-    moderately similar. A constant vector has no correlation to measure and
-    scores 0.
+    Pearson's ``-1`` to ``1`` range is mapped onto ``[0, 1]``. Constant vectors
+    score zero because their correlation is undefined.
     """
 
     id = "correlation"
@@ -28,9 +20,7 @@ class CorrelationSimilarity(PairwiseSimilarity):
         reference_vector = prepared.reference_vector
         weights = prepared.weights
 
-        # Correlation is undefined for a single point. The original
-        # implementation fell through to the log-difference score in that case
-        # rather than failing, and callers depend on that.
+        # Keep the existing log-difference fallback for one shared element.
         if len(input_vector) < 2:
             return LogDifferenceSimilarity().score_vectors(prepared)
 

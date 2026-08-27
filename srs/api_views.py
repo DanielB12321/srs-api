@@ -1,31 +1,28 @@
-from math import ceil
-from django.db import transaction
-from django.db.models import Count
-from django.utils import timezone
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
+"""Upload, search and analysis endpoints for the SRS API."""
 
 import hashlib
 import heapq
-import threading
 import json
-
+import logging
+import threading
+from math import ceil
 from time import perf_counter
 
 from django.db import close_old_connections, transaction
+from django.db.models import Count
 from django.utils import timezone
-from drf_spectacular.utils import extend_schema, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from .algorithms import available_algorithms, get_algorithm
+
+from .algorithms import available_algorithms, default_algorithm_id, get_algorithm
 from .algorithms.base import PairwiseSimilarity
-from .algorithms.knn_aitchison import DEFAULT_DETAIL_TOP_N
-from .projections import fit_pca, project_points
+from .algorithms.knn_aitchison import DEFAULT_DETAIL_TOP_N, DEFAULT_K
+from .authentication import caller_audit_fields
 from .importers import run_import, run_dataset_import
 from .preprocessing import (
     PIPELINE_VERSION,
@@ -34,44 +31,52 @@ from .preprocessing import (
     prepare_vectors,
     resolve_options,
 )
-from .services.units import concentration_to_ppm
-from .authentication import caller_audit_fields
-
-from math import ceil
-
-
 from .models import (
-    ReferenceImport,
     Dataset,
+    FullAnalysis,
+    FullAnalysisMatch,
+    ReferenceImport,
+    ReferenceSample,
     Sample,
     SampleMeasurement,
-    ReferenceSample,
-    ReferenceSampleMeasurement,
-    Element,
-    FullAnalysis,
-    FullAnalysisInputMeasurement,
-    FullAnalysisMatch,
 )
+from .projections import fit_pca, project_points
 from .serializers import (
-    SampleSerializer,
-    SampleMeasurementSerializer,
-    ReferenceSampleSerializer,
-    ReferenceSampleMeasurementSerializer,
-    ReferenceImportSerializer,
-    ReferenceImportUploadSerializer,
     DatasetSerializer,
     DatasetUploadSerializer,
+    ReferenceImportSerializer,
+    ReferenceImportUploadSerializer,
     ReferenceLibrarySearchResultSerializer,
 )
 
-def reference_library_version() -> str:
-    """
-    Identify the reference library a run was scored against.
 
-    The most recent completed import is the anchor. There is no separate
-    version field on the library, and inventing one would mean maintaining a
-    scheme that could drift from the imports it describes.
-    """
+logger = logging.getLogger(__name__)
+
+
+def _as_boolean(value) -> bool:
+    """Convert common request values to a real boolean."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _as_json_object(value) -> dict:
+    """Return a JSON object from current or older stored values."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def reference_library_version() -> str:
+    """Identify the latest completed reference-library import."""
     latest = (
         ReferenceImport.objects
         .filter(status=ReferenceImport.STATUS_COMPLETED)
@@ -88,18 +93,16 @@ def reference_library_version() -> str:
 
 
 def _sha256_of(uploaded_file) -> str:
+    """Hash an upload, then rewind it before Django saves the file."""
     hasher = hashlib.sha256()
     for chunk in uploaded_file.chunks():
         hasher.update(chunk)
     uploaded_file.seek(0)
     return hasher.hexdigest()
 
-class ReferenceImportViewSet(viewsets.ModelViewSet):
 
-    # POST   /api/srs/reference-imports/          -> upload data + metadata workbooks
-    # GET    /api/srs/reference-imports/          -> list imports (status, counts, timestamps)
-    # GET    /api/srs/reference-imports/{id}/     -> single import detail + errors
-    # DELETE /api/srs/reference-imports/{id}/     -> remove an import and its derived rows (CASCADE)
+class ReferenceImportViewSet(viewsets.ModelViewSet):
+    """Upload, inspect, rerun or remove a reference-library import."""
 
     queryset = ReferenceImport.objects.all().order_by("-created_at")
     parser_classes = (MultiPartParser, FormParser)
@@ -161,15 +164,14 @@ class ReferenceImportViewSet(viewsets.ModelViewSet):
 
         threading.Thread(target=run_import, args=[import_row.id], daemon=True).start()
 
-        return Response(ReferenceImportSerializer(import_row).data, status=status.HTTP_202_ACCEPTED)
+        return Response(
+            ReferenceImportSerializer(import_row).data,
+            status=status.HTTP_202_ACCEPTED,
+        )
 
 
 class DatasetViewSet(viewsets.ModelViewSet):
-
-    # POST   /api/srs/datasets/          -> upload a dataset CSV
-    # GET    /api/srs/datasets/          -> list datasets (status, counts, timestamps)
-    # GET    /api/srs/datasets/{id}/     -> single dataset detail + errors
-    # DELETE /api/srs/datasets/{id}/     -> remove a dataset and its derived rows (CASCADE)
+    """Upload, inspect, rerun or remove an analysed CSV dataset."""
 
     queryset = Dataset.objects.all().order_by("-created_at")
     parser_classes = (MultiPartParser, FormParser, JSONParser)
@@ -186,7 +188,12 @@ class DatasetViewSet(viewsets.ModelViewSet):
         uploaded_file = upload.validated_data["uploaded_file"]
         file_hash = _sha256_of(uploaded_file)
 
-        existing = Dataset.objects.filter(file_sha256=file_hash).first()
+        existing = (
+            Dataset.objects
+            .filter(file_sha256=file_hash)
+            .exclude(status=Dataset.STATUS_FAILED)
+            .first()
+        )
 
         if existing is not None:
             return Response(
@@ -209,6 +216,7 @@ class DatasetViewSet(viewsets.ModelViewSet):
         try:
             run_dataset_import(dataset.id)
         except Exception:
+            logger.exception("Dataset import failed for dataset %s", dataset.id)
             dataset.refresh_from_db()
             return Response(
                 DatasetSerializer(dataset).data,
@@ -229,6 +237,7 @@ class DatasetViewSet(viewsets.ModelViewSet):
         try:
             run_dataset_import(dataset.id)
         except Exception:
+            logger.exception("Dataset rerun failed for dataset %s", dataset.id)
             dataset.refresh_from_db()
             return Response(
                 DatasetSerializer(dataset).data,
@@ -268,20 +277,17 @@ class DatasetViewSet(viewsets.ModelViewSet):
         end = start + page_size
         page_samples = list(samples_qs[start:end])
 
-        all_measurements = (
+        measurement_fields = (
             SampleMeasurement.objects
             .filter(sample__dataset=dataset)
-            .select_related("element")
+            .values_list("element__symbol", "unit")
             .order_by("element__symbol", "unit")
+            .distinct()
         )
-
-        measurement_columns = []
-
-        for measurement in all_measurements:
-            column_name = self._measurement_column_name(measurement)
-
-            if column_name not in measurement_columns:
-                measurement_columns.append(column_name)
+        measurement_columns = [
+            f"{symbol}_{unit}" if unit else symbol
+            for symbol, unit in measurement_fields
+        ]
 
         columns = ["sample_id", "latitude", "longitude"] + measurement_columns
 
@@ -338,29 +344,96 @@ class DatasetViewSet(viewsets.ModelViewSet):
         return symbol
 
 
-# Reference Library Search query APIView
+# Reference-library search filters shown in the generated API documentation.
 @extend_schema(
     parameters=[
-        OpenApiParameter("deposit_name",      OpenApiTypes.STR,   description="Partial deposit name match. e.g. Olympic"),
-        OpenApiParameter("deposit_type",      OpenApiTypes.STR,   description="Exact deposit type. e.g. IOCG, Epithermal, Carlin Au, Granite Related"),
-        OpenApiParameter("mineral_system",    OpenApiTypes.STR,   description="Exact mineral system. e.g. Orogenic Au, High Sulphidation Epithermal, Greisen"),
-        OpenApiParameter("country",           OpenApiTypes.STR,   description="Partial country name match. e.g. Australia"),
-        OpenApiParameter("state_region",      OpenApiTypes.STR,   description="Partial state or region match. e.g. Queensland"),
-        OpenApiParameter("sample_code",       OpenApiTypes.STR,   description="Partial sample code match. e.g. 700001"),
-        OpenApiParameter("sample_type",       OpenApiTypes.STR,   description="Exact sample type. e.g. VHMS, Epithermal, Skarn / Skarn Au, Porphyry / Porphyry Cu"),
-        OpenApiParameter("ore_minerals",      OpenApiTypes.STR,   description="Comma-separated ore minerals (AND logic — sample must contain all). e.g. Pyrite,Chalcopyrite"),
-        OpenApiParameter("element",           OpenApiTypes.STR,   description="Element symbol to filter measurements against. e.g. Au, Ag, Cu, Zn"),
-        OpenApiParameter("min_value",         OpenApiTypes.FLOAT, description="Minimum measurement value for the specified element. e.g. 1.0"),
-        OpenApiParameter("max_value",         OpenApiTypes.FLOAT, description="Maximum measurement value for the specified element. e.g. 10.0"),
-        OpenApiParameter("analytical_method", OpenApiTypes.STR,   description="Analytical method used for measurement. e.g. FA (fire assay), AR (aqua regia)"),
-        OpenApiParameter("exclude_bdl",       OpenApiTypes.BOOL,  description="Set true to exclude below-detection-limit measurements from element filtering"),
-        OpenApiParameter("limit",             OpenApiTypes.INT,   description="Number of results to return. Default 25, max 500"),
-        OpenApiParameter("offset",            OpenApiTypes.INT,   description="Number of results to skip for pagination. Default 0"),
+        OpenApiParameter(
+            "deposit_name",
+            OpenApiTypes.STR,
+            description="Partial deposit name, for example Olympic.",
+        ),
+        OpenApiParameter(
+            "deposit_type",
+            OpenApiTypes.STR,
+            description="Exact deposit type, for example IOCG or Epithermal.",
+        ),
+        OpenApiParameter(
+            "mineral_system",
+            OpenApiTypes.STR,
+            description="Exact mineral system, for example Orogenic Au.",
+        ),
+        OpenApiParameter(
+            "country",
+            OpenApiTypes.STR,
+            description="Partial country name, for example Australia.",
+        ),
+        OpenApiParameter(
+            "state_region",
+            OpenApiTypes.STR,
+            description="Partial state or region, for example Queensland.",
+        ),
+        OpenApiParameter(
+            "sample_code",
+            OpenApiTypes.STR,
+            description="Partial sample code, for example 700001.",
+        ),
+        OpenApiParameter(
+            "sample_type",
+            OpenApiTypes.STR,
+            description="Exact sample type, for example VHMS or Skarn Au.",
+        ),
+        OpenApiParameter(
+            "ore_minerals",
+            OpenApiTypes.STR,
+            description="Comma-separated minerals that must all be present.",
+        ),
+        OpenApiParameter(
+            "element",
+            OpenApiTypes.STR,
+            description="Element symbol used for measurement filters.",
+        ),
+        OpenApiParameter(
+            "min_value",
+            OpenApiTypes.FLOAT,
+            description="Minimum value for the selected element.",
+        ),
+        OpenApiParameter(
+            "max_value",
+            OpenApiTypes.FLOAT,
+            description="Maximum value for the selected element.",
+        ),
+        OpenApiParameter(
+            "analytical_method",
+            OpenApiTypes.STR,
+            description="Exact analytical method, for example FA or AR.",
+        ),
+        OpenApiParameter(
+            "exclude_bdl",
+            OpenApiTypes.BOOL,
+            description="Exclude below-detection-limit measurements.",
+        ),
+        OpenApiParameter(
+            "limit",
+            OpenApiTypes.INT,
+            description="Results to return (default 25, maximum 500).",
+        ),
+        OpenApiParameter(
+            "offset",
+            OpenApiTypes.INT,
+            description="Results to skip for pagination.",
+        ),
     ],
+    responses={200: OpenApiTypes.OBJECT},
 )
 class ReferenceLibrarySearchView(APIView):
+    """Search reference samples and their measurements."""
+
     def get(self, request):
-        qs = ReferenceSample.objects.select_related("reference_deposit").prefetch_related("measurements__element")
+        qs = (
+            ReferenceSample.objects
+            .select_related("reference_deposit")
+            .prefetch_related("measurements__element")
+        )
 
         p = request.query_params
 
@@ -383,50 +456,62 @@ class ReferenceLibrarySearchView(APIView):
             qs = qs.filter(sample_type__iexact=sample_type)
         if ore_minerals := p.get("ore_minerals"):
             for mineral in ore_minerals.split(","):
-                # JSON array element search — __contains is PostgreSQL-only,
-                # so search the serialised JSON text for the quoted string instead.
+                # Text search also works with the local SQLite database.
                 qs = qs.filter(metadata__icontains=f'"{mineral.strip()}"')
 
         # Measurement-level filters
         if element := p.get("element"):
-            f = {"measurements__element__symbol__iexact": element}
-            if min_val := p.get("min_value"):
-                f["measurements__value__gte"] = float(min_val)
-            if max_val := p.get("max_value"):
-                f["measurements__value__lte"] = float(max_val)
+            filters = {"measurements__element__symbol__iexact": element}
+            try:
+                if min_value := p.get("min_value"):
+                    filters["measurements__value__gte"] = float(min_value)
+                if max_value := p.get("max_value"):
+                    filters["measurements__value__lte"] = float(max_value)
+            except (TypeError, ValueError):
+                return Response(
+                    {"error": "min_value and max_value must be numbers."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             if method := p.get("analytical_method"):
-                f["measurements__analytical_method__iexact"] = method
-            if p.get("exclude_bdl", "").lower() == "true":
-                f["measurements__below_detection_limit"] = False
-            qs = qs.filter(**f)
+                filters["measurements__analytical_method__iexact"] = method
+            if _as_boolean(p.get("exclude_bdl", False)):
+                filters["measurements__below_detection_limit"] = False
+            qs = qs.filter(**filters)
 
         qs = qs.distinct()
 
         try:
-            limit  = max(1, min(int(p.get("limit", 25)), 500))
+            limit = max(1, min(int(p.get("limit", 25)), 500))
             offset = max(0, int(p.get("offset", 0)))
-        except ValueError:
-            return Response({"error": "limit and offset must be integers."}, status=400)
+        except (TypeError, ValueError):
+            return Response(
+                {"error": "limit and offset must be integers."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         total = qs.count()
         samples = qs[offset : offset + limit]
 
-        return Response({
-            "total": total,
-            "limit": limit,
-            "offset": offset,
-            "results": ReferenceLibrarySearchResultSerializer(samples, many=True).data
-        })
-    
+        return Response(
+            {
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "results": ReferenceLibrarySearchResultSerializer(
+                    samples,
+                    many=True,
+                ).data,
+            }
+        )
+
+
 class BulkReferenceSampleDetailView(APIView):
-    """
-    POST /api/reference-samples/bulk-details/
+    """Return details for up to 50 reference samples in one request."""
 
-    Return complete reference data for up to 50 sample IDs in one response.
-    select_related and prefetch_related keep this to a small, fixed number of
-    database queries instead of querying once per ranked match.
-    """
-
+    @extend_schema(
+        request=OpenApiTypes.OBJECT,
+        responses={200: OpenApiTypes.OBJECT},
+    )
     def post(self, request):
         requested_ids = request.data.get("ids")
 
@@ -438,7 +523,9 @@ class BulkReferenceSampleDetailView(APIView):
 
         try:
             # dict.fromkeys removes duplicates without changing requested order.
-            sample_ids = list(dict.fromkeys(int(sample_id) for sample_id in requested_ids))
+            sample_ids = list(
+                dict.fromkeys(int(sample_id) for sample_id in requested_ids)
+            )
         except (TypeError, ValueError):
             return Response(
                 {"error": "Every sample ID must be an integer."},
@@ -504,16 +591,8 @@ class BulkReferenceSampleDetailView(APIView):
         }
 
 
-
 class SimilarityAlgorithmListView(APIView):
-    """
-    GET /api/algorithms/
-
-    List the similarity algorithms this deployment can run, so the analysis
-    setup page can offer the choice instead of hardcoding a list that drifts
-    from what the service actually supports. The id of any entry is a valid
-    similarity_method for POST /api/full-analysis/.
-    """
+    """List the similarity algorithms available to the analysis page."""
 
     @extend_schema(
         responses={200: OpenApiTypes.OBJECT},
@@ -542,43 +621,19 @@ class SimilarityAlgorithmListView(APIView):
 
 
 class FullAnalysisListCreateView(APIView):
-    """
-    GET  /api/full-analysis/
-    POST /api/full-analysis/
-
-    A POST request queues the complete workflow:
-    1. Save the uploaded/test samples and analysis configuration.
-    2. Compare each sample with the reference library in background batches.
-    3. Save each sample's final highest-scoring reference IDs.
-
-    A GET request returns summaries of previously saved analyses.
-    """
+    """List saved analyses or queue a new multi-sample analysis."""
 
     def normalise_element_symbol(self, symbol):
-        """Return a consistently capitalised symbol, for example 'CU' -> 'Cu'."""
-        # One implementation, in the preprocessing package, so a symbol written
-        # by the request path and one read by the pipeline cannot disagree.
+        """Return a consistently capitalised element symbol."""
         return normalise_symbol(symbol)
 
-
     def serialize_full_analysis_summary(self, full_analysis):
-        sample_data = full_analysis.sample_data or {}
-
-        if isinstance(sample_data, str):
-            try:
-                sample_data = json.loads(sample_data)
-            except (json.JSONDecodeError, TypeError):
-                sample_data = {}
-
-        parameters = full_analysis.parameters or {}
-
-        if isinstance(parameters, str):
-            try:
-                parameters = json.loads(parameters)
-            except (json.JSONDecodeError, TypeError):
-                parameters = {}
-
-        samples = sample_data.get("samples") or [] #a
+        sample_data = _as_json_object(full_analysis.sample_data)
+        parameters = _as_json_object(full_analysis.parameters)
+        samples = sample_data.get("samples") or []
+        match_count = getattr(full_analysis, "saved_match_count", None)
+        if match_count is None:
+            match_count = full_analysis.ranked_matches.count()
 
         return {
             "id": full_analysis.id,
@@ -589,7 +644,7 @@ class FullAnalysisListCreateView(APIView):
             "status": full_analysis.status,
             "created_at": full_analysis.created_at,
             "completed_at": full_analysis.completed_at,
-            "match_count": full_analysis.ranked_matches.count(),
+            "match_count": match_count,
             "sample_count": len(samples) or 1,
             "sample_codes": [
                 sample.get("sample_code")
@@ -601,8 +656,16 @@ class FullAnalysisListCreateView(APIView):
             "parameters": parameters,
         }
 
+    @extend_schema(
+        operation_id="full_analysis_list",
+        responses={200: OpenApiTypes.OBJECT},
+    )
     def get(self, request):
-        full_analyses = FullAnalysis.objects.all().order_by("-created_at")
+        full_analyses = (
+            FullAnalysis.objects
+            .annotate(saved_match_count=Count("ranked_matches"))
+            .order_by("-created_at")
+        )
 
         return Response({
             "count": full_analyses.count(),
@@ -612,12 +675,21 @@ class FullAnalysisListCreateView(APIView):
             ],
         })
 
+    @extend_schema(
+        operation_id="full_analysis_create",
+        request=OpenApiTypes.OBJECT,
+        responses={202: OpenApiTypes.OBJECT},
+    )
     def post(self, request):
-        analysis_name = request.data.get("analysis_name") or request.data.get("name") or "Uploaded analysis"
+        analysis_name = (
+            request.data.get("analysis_name")
+            or request.data.get("name")
+            or "Uploaded analysis"
+        )
         source_filename = request.data.get("source_filename", "")
         similarity_method = (
             request.data.get("similarity_method")
-            or "log_difference_similarity"
+            or default_algorithm_id()
         )
         preprocessing = request.data.get("preprocessing") or {}
 
@@ -635,6 +707,18 @@ class FullAnalysisListCreateView(APIView):
                     {"error": "top_n must be an integer or 'all'."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+
+        try:
+            detail_top_n = max(
+                0,
+                int(request.data.get("detail_top_n", DEFAULT_DETAIL_TOP_N)),
+            )
+            neighbours = max(1, int(request.data.get("k", DEFAULT_K)))
+        except (TypeError, ValueError):
+            return Response(
+                {"error": "detail_top_n and k must be integers."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         raw_samples = request.data.get("samples")
 
@@ -681,10 +765,10 @@ class FullAnalysisListCreateView(APIView):
         sample_snapshot = dict(request.data)
         sample_snapshot["samples"] = samples
 
-        # Record which algorithm actually ran, not just what was asked for. An
-        # unrecognised similarity_method resolves to the default, and without
-        # this a stored analysis would claim to have used something it did not.
+        # Resolve once so every saved field names the algorithm that will run.
+        requested_similarity_method = similarity_method
         resolved_algorithm = get_algorithm(similarity_method)
+        similarity_method = resolved_algorithm.id
 
         full_analysis = FullAnalysis.objects.create(
             name=analysis_name,
@@ -695,11 +779,14 @@ class FullAnalysisListCreateView(APIView):
             parameters={
                 "top_n": top_n,
                 "batch_size": 250,
+                "detail_top_n": detail_top_n,
+                "k": neighbours,
                 "dataset_id": request.data.get("dataset_id"),
                 "dataset_name": request.data.get("dataset_name"),
                 "selected_elements": request.data.get("selected_elements") or [],
                 "preprocessing": preprocessing,
                 "similarity_method": similarity_method,
+                "requested_similarity_method": requested_similarity_method,
                 "algorithm_id": resolved_algorithm.id,
                 "algorithm_version": resolved_algorithm.version,
                 "pipeline_version": PIPELINE_VERSION,
@@ -742,13 +829,14 @@ class FullAnalysisListCreateView(APIView):
 
         try:
             full_analysis = FullAnalysis.objects.get(id=full_analysis_id)
-            samples = full_analysis.sample_data.get("samples") or []
-            parameters = dict(full_analysis.parameters)
+            sample_data = _as_json_object(full_analysis.sample_data)
+            samples = sample_data.get("samples") or []
+            parameters = _as_json_object(full_analysis.parameters)
             top_n = int(parameters["top_n"])
             batch_size = int(parameters.get("batch_size", 250))
             similarity_method = parameters.get(
                 "similarity_method",
-                "log_difference_similarity",
+                default_algorithm_id(),
             )
             preprocessing = parameters.get("preprocessing") or {}
             algorithm = get_algorithm(similarity_method)
@@ -814,17 +902,18 @@ class FullAnalysisListCreateView(APIView):
                 "projection",
             ])
         except Exception as error:
+            logger.exception("Full analysis %s failed", full_analysis_id)
+            saved_parameters = (
+                FullAnalysis.objects
+                .filter(id=full_analysis_id)
+                .values_list("parameters", flat=True)
+                .first()
+            )
             FullAnalysis.objects.filter(id=full_analysis_id).update(
                 status=FullAnalysis.STATUS_FAILED,
                 completed_at=timezone.now(),
                 parameters={
-                    **(
-                        FullAnalysis.objects
-                        .filter(id=full_analysis_id)
-                        .values_list("parameters", flat=True)
-                        .first()
-                        or {}
-                    ),
+                    **_as_json_object(saved_parameters),
                     "error": str(error),
                 },
             )
@@ -832,13 +921,7 @@ class FullAnalysisListCreateView(APIView):
             close_old_connections()
 
     def build_sample_results(self, full_analysis, samples):
-        """
-        Summarise each analysed sample and its leading matches.
-
-        This is the envelope's per-sample block. It is small by design, holding
-        only the top few matches per sample, so the map and overview views can
-        be drawn without paging through every ranked match.
-        """
+        """Summarise each sample and its five leading matches."""
         leading = (
             full_analysis.ranked_matches
             .filter(rank__lte=5)
@@ -872,19 +955,7 @@ class FullAnalysisListCreateView(APIView):
         ]
 
     def build_projection(self, full_analysis, samples, options, max_references=200):
-        """
-        Place the analysed samples and their matches on a two-dimensional map.
-
-        The axes are fitted on the matched references rather than on the whole
-        library, which bounds both the memory used and the number of points a
-        client has to draw. PCA is used because it yields a fixed linear map,
-        so an uploaded sample lands in the same space as the references without
-        anything being recomputed.
-
-        Returns None when there is too little shared chemistry to place points
-        honestly; the projection block is optional precisely so that this is a
-        valid outcome.
-        """
+        """Build a small PCA plot from analysed samples and leading matches."""
         matched_ids = list(
             full_analysis.ranked_matches
             .filter(rank__lte=max_references)
@@ -960,7 +1031,9 @@ class FullAnalysisListCreateView(APIView):
                 "element_symbol": symbol,
                 "value": item.get("value"),
                 "unit": item.get("unit", "ppm"),
-                "below_detection_limit": bool(item.get("below_detection_limit", False)),
+                "below_detection_limit": _as_boolean(
+                    item.get("below_detection_limit", False)
+                ),
                 "detection_limit": item.get("detection_limit"),
             })
 
@@ -983,18 +1056,13 @@ class FullAnalysisListCreateView(APIView):
         similarity_method,
         preprocessing,
     ):
-        """
-        Compare one saved test sample with the reference library.
-
-        Only the reference sample ID, rank, and final score are persisted for a
-        match. Descriptive reference data stays in the reference library and is
-        requested separately when the results page needs it.
-        """
+        """Compare one analysed sample with the reference library."""
         # Resolved once, outside the reference loop, so policy names are not
         # revalidated on every one of a thousand comparisons.
+        saved_parameters = _as_json_object(full_analysis.parameters)
         options = resolve_options(
             preprocessing,
-            (full_analysis.parameters or {}).get("selected_elements"),
+            saved_parameters.get("selected_elements"),
         )
         algorithm = get_algorithm(similarity_method)
 
@@ -1060,12 +1128,11 @@ class FullAnalysisListCreateView(APIView):
                 elif candidate > best_matches[0]:
                     heapq.heapreplace(best_matches, candidate)
 
-            parameters = dict(
+            parameters = _as_json_object(
                 FullAnalysis.objects
                 .filter(id=full_analysis.id)
                 .values_list("parameters", flat=True)
                 .first()
-                or {}
             )
             parameters.update({
                 "current_sample_index": sample_index,
@@ -1077,15 +1144,18 @@ class FullAnalysisListCreateView(APIView):
             )
 
         ranked_candidates = sorted(best_matches, reverse=True)
+        saved_parameters = _as_json_object(full_analysis.parameters)
         detail_top_n = int(
-            (full_analysis.parameters or {}).get("detail_top_n", DEFAULT_DETAIL_TOP_N)
+            saved_parameters.get("detail_top_n", DEFAULT_DETAIL_TOP_N)
         )
+        neighbours = int(saved_parameters.get("k", DEFAULT_K))
         detail = self.build_match_detail(
             algorithm,
             input_values,
             input_imputed,
             ranked_candidates[:detail_top_n],
             options,
+            nearest_candidates=ranked_candidates[:neighbours],
         )
 
         created_matches = [
@@ -1117,15 +1187,7 @@ class FullAnalysisListCreateView(APIView):
         batch_size,
         options,
     ):
-        """
-        Run an algorithm that needs every reference in memory at once.
-
-        Anything that fits a model or builds a projection cannot be scored one
-        reference at a time, so the library is materialised and handed over
-        whole. That costs more memory than the streaming path, which is why the
-        streaming path remains the default and this is used only when an
-        algorithm genuinely requires it.
-        """
+        """Run an algorithm that compares against the whole library at once."""
         input_values, input_imputed = extract_values(measurements, options)
 
         FullAnalysisMatch.objects.filter(
@@ -1158,14 +1220,35 @@ class FullAnalysisListCreateView(APIView):
                 "deposit_class": (deposit.deposit_type or "") if deposit else "",
             })
 
+        sample_data = _as_json_object(full_analysis.sample_data)
+        saved_samples = sample_data.get("samples") or []
+        analysed_sample = (
+            saved_samples[sample_index]
+            if sample_index < len(saved_samples)
+            else {}
+        )
+        sample_code = (
+            analysed_sample.get("sample_code")
+            or f"Sample {sample_index + 1}"
+        )
+
+        saved_parameters = _as_json_object(full_analysis.parameters)
         result = algorithm.compare(
             [{
-                "sample_code": full_analysis.uploaded_sample_code,
+                "sample_code": sample_code,
                 "values": input_values,
                 "imputed": input_imputed,
             }],
             references,
-            {"top_n": top_n, "preprocessing": options},
+            {
+                "top_n": top_n,
+                "preprocessing": options,
+                "detail_top_n": saved_parameters.get(
+                    "detail_top_n",
+                    DEFAULT_DETAIL_TOP_N,
+                ),
+                "k": saved_parameters.get("k", DEFAULT_K),
+            },
         )
 
         created_matches = [
@@ -1199,25 +1282,19 @@ class FullAnalysisListCreateView(APIView):
         input_imputed,
         ranked_candidates,
         options,
+        nearest_candidates=None,
     ):
-        """
-        Compute the extra per-match blocks for the leading matches only.
-
-        Ranking already used every reference, so nothing is lost from the
-        ordering. What is avoided is attaching an evidence block of roughly
-        3.4 KB to each of a few hundred rows that nobody opens.
-
-        An algorithm that offers none of these returns empty defaults from the
-        base class, so this costs one query and nothing else for the
-        concentration-based methods.
-        """
+        """Add evidence and confidence data to the leading matches."""
         if not ranked_candidates:
             return {}
 
-        reference_ids = [
+        nearest_candidates = nearest_candidates or ranked_candidates
+        reference_ids = {
             reference_sample_id
-            for _, reference_sample_id in ranked_candidates
-        ]
+            for _, reference_sample_id in (
+                list(ranked_candidates) + list(nearest_candidates)
+            )
+        }
         reference_samples = (
             ReferenceSample.objects
             .filter(id__in=reference_ids)
@@ -1229,7 +1306,7 @@ class FullAnalysisListCreateView(APIView):
         # Which deposits the nearest references belong to, in rank order. This
         # is what lets an algorithm judge a match by the company it keeps.
         nearest_deposits = []
-        for _, reference_sample_id in ranked_candidates:
+        for _, reference_sample_id in nearest_candidates:
             reference_sample = by_id.get(reference_sample_id)
             deposit = reference_sample.reference_deposit if reference_sample else None
             nearest_deposits.append(
@@ -1238,12 +1315,17 @@ class FullAnalysisListCreateView(APIView):
 
         detail = {}
 
-        for (_, reference_sample_id), deposit_id in zip(
-            ranked_candidates, nearest_deposits
-        ):
+        for _, reference_sample_id in ranked_candidates:
             reference_sample = by_id.get(reference_sample_id)
             if reference_sample is None:
                 continue
+
+            deposit = reference_sample.reference_deposit
+            deposit_id = (
+                (deposit.three_char_code or deposit.name)
+                if deposit
+                else ""
+            )
 
             reference_values, reference_imputed = extract_values(
                 reference_sample.measurements.all(),
@@ -1289,13 +1371,7 @@ class FullAnalysisListCreateView(APIView):
         preprocessing=None,
         imputed_elements=None,
     ):
-        """
-        Score one tested sample against one reference sample.
-
-        The arithmetic lives in srs/algorithms/, one module per algorithm. This
-        resolves the requested method through the registry and delegates, so an
-        unknown or missing name still falls back to the configured default.
-        """
+        """Score one analysed sample against one reference sample."""
         algorithm = get_algorithm(similarity_method)
 
         return algorithm.score_pair(
@@ -1308,15 +1384,7 @@ class FullAnalysisListCreateView(APIView):
 
 
 class FullAnalysisResultView(APIView):
-    """
-    GET /api/full-analysis/<full_analysis_id>/
-
-    Returns one saved full analysis result for the results page.
-
-    The analysed sample includes all saved input measurements. Ranked matches
-    are deliberately compact: each contains only the reference sample ID, rank,
-    and similarity score. Reference details have their own API endpoints.
-    """
+    """Return the saved overview for one full analysis."""
 
     def serialize_input_measurement(self, measurement):
         return {
@@ -1328,7 +1396,8 @@ class FullAnalysisResultView(APIView):
         }
 
     def get_saved_samples(self, full_analysis):
-        saved_samples = full_analysis.sample_data.get("samples")
+        sample_data = _as_json_object(full_analysis.sample_data)
+        saved_samples = sample_data.get("samples")
         if isinstance(saved_samples, list) and saved_samples:
             return saved_samples
 
@@ -1338,7 +1407,7 @@ class FullAnalysisResultView(APIView):
             .all()
         )
         return [{
-            **full_analysis.sample_data,
+            **sample_data,
             "sample_code": full_analysis.uploaded_sample_code,
             "name": full_analysis.name,
             "source_filename": full_analysis.source_filename,
@@ -1348,6 +1417,10 @@ class FullAnalysisResultView(APIView):
             ],
         }]
 
+    @extend_schema(
+        operation_id="full_analysis_detail",
+        responses={200: OpenApiTypes.OBJECT},
+    )
     def get(self, request, full_analysis_id):
         try:
             full_analysis = FullAnalysis.objects.get(id=full_analysis_id)
@@ -1408,21 +1481,10 @@ class FullAnalysisResultView(APIView):
 
 
 class FullAnalysisSampleResultView(FullAnalysisResultView):
-    """
-    GET /api/full-analysis/<analysis_id>/samples/<sample_index>/
-
-    Return one tested sample and one paginated page of its ranked matches.
-    """
+    """Return one analysed sample and a page of its ranked matches."""
 
     def serialize_ranked_match(self, match):
-        """
-        Serialise one ranked match.
-
-        id, rank, and similarity_score keep the names and positions they have
-        always had. The newer blocks are added only when an algorithm actually
-        produced them, so a response for a method that produces none is
-        byte-identical to what it was before they existed.
-        """
+        """Serialise a ranked match and any optional detail blocks."""
         result = {
             "id": match.reference_sample_id,
             "rank": match.rank,
@@ -1438,6 +1500,10 @@ class FullAnalysisSampleResultView(FullAnalysisResultView):
 
         return result
 
+    @extend_schema(
+        operation_id="full_analysis_sample_detail",
+        responses={200: OpenApiTypes.OBJECT},
+    )
     def get(self, request, full_analysis_id, sample_index):
         try:
             full_analysis = FullAnalysis.objects.get(id=full_analysis_id)
@@ -1488,13 +1554,12 @@ class FullAnalysisSampleResultView(FullAnalysisResultView):
 
 
 class FullAnalysisSampleMapView(FullAnalysisResultView):
-    """
-    GET /api/full-analysis/<analysis_id>/samples/<sample_index>/map/
+    """Return map coordinates for one sample's ranked references."""
 
-    Return lightweight coordinates for every ranked reference match belonging
-    to one tested sample. Measurements are intentionally excluded.
-    """
-
+    @extend_schema(
+        operation_id="full_analysis_sample_map",
+        responses={200: OpenApiTypes.OBJECT},
+    )
     def get(self, request, full_analysis_id, sample_index):
         try:
             full_analysis = FullAnalysis.objects.get(id=full_analysis_id)
@@ -1560,13 +1625,12 @@ class FullAnalysisSampleMapView(FullAnalysisResultView):
 
 
 class FullAnalysisMapView(FullAnalysisResultView):
-    """
-    GET /api/full-analysis/<analysis_id>/map/
+    """Return each unique reference at its best overall similarity."""
 
-    Return every unique reference match, globally ranked by the best similarity
-    it achieved against any analysed sample.
-    """
-
+    @extend_schema(
+        operation_id="full_analysis_map",
+        responses={200: OpenApiTypes.OBJECT},
+    )
     def get(self, request, full_analysis_id):
         try:
             full_analysis = FullAnalysis.objects.get(id=full_analysis_id)

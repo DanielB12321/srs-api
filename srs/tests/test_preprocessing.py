@@ -1,11 +1,4 @@
-"""
-Tests for the shared preprocessing head.
-
-Two jobs here. First, that the new toggles do what they claim. Second, and more
-important, that leaving them alone changes nothing: the characterisation suite
-would catch a drift in scores, but these state the guarantee directly so the
-reason a default exists is written down next to the default.
-"""
+"""Tests for measurement preprocessing and its analysis options."""
 
 from django.test import SimpleTestCase, TestCase
 
@@ -45,7 +38,7 @@ def measurement(symbol, value, unit="ppm", below_dl=False, detection_limit=None)
 
 
 class OptionResolutionTests(SimpleTestCase):
-    """The request's preprocessing block is free-form JSON from another repo."""
+    """Check defaults and request option validation."""
 
     def test_defaults_reproduce_the_behaviour_that_existed_before(self):
         options = resolve_options()
@@ -57,10 +50,6 @@ class OptionResolutionTests(SimpleTestCase):
         self.assertEqual(options["selected_elements"], [])
 
     def test_unknown_policy_names_fall_back_instead_of_raising(self):
-        """
-        A newer frontend, or a typo, must not take an analysis down. The service
-        cannot validate against a vocabulary it does not control.
-        """
         options = resolve_options({
             "handle_missing": "something_invented_later",
             "weighting_mode": "also_unknown",
@@ -80,6 +69,16 @@ class OptionResolutionTests(SimpleTestCase):
         self.assertEqual(options["weighting_mode"], SELECTED_BOOST)
         self.assertTrue(options["normalise"])
 
+    def test_clr_disables_the_separate_log_transform(self):
+        options = resolve_options({
+            "normalise": True,
+            "log_transform": True,
+        })
+
+        self.assertTrue(options["normalise"])
+        self.assertFalse(options["log_transform"])
+        self.assertFalse(describe(options)["log_transform"])
+
     def test_selected_element_symbols_are_normalised(self):
         options = resolve_options({}, ["cu", "ZN", " au ", "", None])
 
@@ -94,11 +93,7 @@ class OptionResolutionTests(SimpleTestCase):
 
 
 class CensoredValueTests(SimpleTestCase):
-    """
-    Below-detection handling, which is the dominant missing-data problem in the
-    reference library: about 15% of measurements are censored, and every one of
-    them records its detection limit.
-    """
+    """Check the supported below-detection-limit policies."""
 
     def censored_sample(self, unit="ppm"):
         return [
@@ -134,7 +129,6 @@ class CensoredValueTests(SimpleTestCase):
         self.assertEqual(imputed, {"Zn"})
 
     def test_the_detection_limit_is_converted_to_ppm_like_any_other_value(self):
-        """A limit in ppb must not be substituted as though it were ppm."""
         values, _ = extract_values(
             [measurement("Au", None, unit="ppb", below_dl=True, detection_limit=5.0)],
             resolve_options({"handle_missing": HALF_DETECTION_LIMIT}),
@@ -153,7 +147,7 @@ class CensoredValueTests(SimpleTestCase):
 
 
 class ExtractionTests(SimpleTestCase):
-    """Unit conversion and the filters that keep dishonest comparisons out."""
+    """Check unit conversion and invalid-value filtering."""
 
     def test_units_are_converted_to_ppm(self):
         values, _ = extract_values([
@@ -184,14 +178,7 @@ class ExtractionTests(SimpleTestCase):
 
 
 class SelectedElementTests(SimpleTestCase):
-    """
-    The user's element choice, which was stored and ignored until now.
-
-    The two modes are deliberately different: by default a selection restricts
-    the comparison, but under selected_boost it becomes a preference instead,
-    because boosting selected elements would mean nothing if everything else
-    had already been discarded.
-    """
+    """Check filtering and boost behaviour for selected elements."""
 
     def sample(self):
         return [
@@ -223,7 +210,7 @@ class SelectedElementTests(SimpleTestCase):
 
 
 class WeightingTests(SimpleTestCase):
-    """Per-element weights, and the guarantee that equal weighting costs nothing."""
+    """Check selected-element weights and the unweighted default."""
 
     def prepared(self, preprocessing=None, selected=None):
         return prepare_vectors(
@@ -234,11 +221,6 @@ class WeightingTests(SimpleTestCase):
         )
 
     def test_equal_weighting_produces_no_weights_at_all(self):
-        """
-        None rather than a list of ones. That is what routes scoring through
-        the original unweighted arithmetic, so enabling the feature elsewhere
-        cannot perturb a run that does not use it.
-        """
         self.assertIsNone(self.prepared().weights)
 
     def test_selected_boost_weights_the_chosen_elements_higher(self):
@@ -248,7 +230,6 @@ class WeightingTests(SimpleTestCase):
         self.assertEqual(prepared.weights, [1.0, 2.0, 1.0])
 
     def test_boosting_every_element_is_the_same_as_boosting_none(self):
-        """A uniform boost is uniform, so it must take the unweighted path."""
         prepared = self.prepared(
             {"weighting_mode": SELECTED_BOOST},
             ["Cu", "Zn", "Au"],
@@ -263,7 +244,7 @@ class WeightingTests(SimpleTestCase):
 
 
 class PreparedVectorTests(SimpleTestCase):
-    """Alignment, transforms, and the imputed mask."""
+    """Check vector alignment, transforms and imputed flags."""
 
     def test_vectors_are_aligned_by_sorted_symbol(self):
         prepared = prepare_vectors(
@@ -277,7 +258,6 @@ class PreparedVectorTests(SimpleTestCase):
         self.assertEqual(prepared.reference_vector, [1.0, 1000.0, 10.0])
 
     def test_the_imputed_mask_lines_up_with_the_symbols(self):
-        """Rule 3's imputed flag has no other source than this mask."""
         prepared = prepare_vectors(
             INPUT_VALUES,
             REFERENCE_VALUES["identical"],
@@ -331,7 +311,7 @@ class PreparedVectorTests(SimpleTestCase):
 
 
 class DescribeTests(SimpleTestCase):
-    """What ends up in the run block, and therefore what makes a run repeatable."""
+    """Check the preprocessing summary stored with an analysis."""
 
     def test_the_description_carries_the_pipeline_version_and_policies(self):
         described = describe(
@@ -352,11 +332,7 @@ class DescribeTests(SimpleTestCase):
 
 
 class TogglesReachTheRankingPathTests(TestCase):
-    """
-    End to end through the real ranking path, because a toggle that works in
-    isolation and never reaches the database is exactly the bug this phase
-    exists to fix.
-    """
+    """Check preprocessing options through the stored ranking path."""
 
     def setUp(self):
         self.view = FullAnalysisListCreateView()
@@ -413,10 +389,6 @@ class TogglesReachTheRankingPathTests(TestCase):
         return [measurement(symbol, value) for symbol, value in INPUT_VALUES.items()]
 
     def test_skip_ignores_a_censored_reference_element(self):
-        """
-        Cu is censored, so only Zn and Au are compared. Both match exactly,
-        giving a perfect score from an incomplete comparison.
-        """
         self.add_reference("R1", REFERENCE_VALUES["cu_x10"], censored={"Cu"})
 
         matches = self.rank(self.analysis(), self.input_sample(), {})
@@ -424,10 +396,6 @@ class TogglesReachTheRankingPathTests(TestCase):
         self.assertAlmostEqual(matches[0].similarity_score, 1.0, places=12)
 
     def test_half_detection_limit_brings_the_censored_element_back(self):
-        """
-        With Cu restored at half its 1000 ppm limit, the comparison uses all
-        three elements and the perfect score correctly disappears.
-        """
         self.add_reference("R1", REFERENCE_VALUES["cu_x10"], censored={"Cu"})
 
         matches = self.rank(
@@ -442,10 +410,6 @@ class TogglesReachTheRankingPathTests(TestCase):
         self.assertAlmostEqual(matches[0].similarity_score, expected, places=10)
 
     def test_the_element_selection_restricts_the_comparison(self):
-        """
-        Selecting only Zn and Au excludes the one element that differs, so a
-        reference that would otherwise score badly now matches exactly.
-        """
         self.add_reference("R1", REFERENCE_VALUES["cu_x10"])
 
         without_selection = self.rank(self.analysis(), self.input_sample(), {})
@@ -463,10 +427,6 @@ class TogglesReachTheRankingPathTests(TestCase):
         self.assertAlmostEqual(with_selection[0].similarity_score, 1.0, places=12)
 
     def test_selected_boost_reweights_without_excluding_anything(self):
-        """
-        Boosting Cu, the element that differs, must pull the score down rather
-        than remove the disagreement from the comparison.
-        """
         self.add_reference("R1", REFERENCE_VALUES["cu_x10"])
 
         matches = self.rank(
@@ -483,7 +443,6 @@ class TogglesReachTheRankingPathTests(TestCase):
         )
 
     def test_default_options_leave_the_score_exactly_where_it_was(self):
-        """The guarantee the whole phase rests on, stated at the boundary."""
         self.add_reference("R1", REFERENCE_VALUES["swapped"])
 
         matches = self.rank(self.analysis(), self.input_sample(), {})

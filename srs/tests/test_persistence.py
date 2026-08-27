@@ -1,11 +1,4 @@
-"""
-Tests for persisting and exposing the envelope.
-
-The load-bearing test here is the backwards-compatibility one. Everything else
-added in this phase is additive, and the way that claim fails in practice is
-that a new key appears in a response the frontend already parses. So the shape
-of the existing responses is asserted directly, key by key.
-"""
+"""Tests for saved analysis details and API response compatibility."""
 
 from django.test import TestCase, override_settings
 
@@ -22,8 +15,7 @@ from ..models import (
 from ..preprocessing import PIPELINE_VERSION
 from .test_characterisation import INPUT_VALUES, REFERENCE_VALUES
 
-# The exact keys the separate frontend repository reads today. A new key here
-# is fine; a missing or renamed one breaks a page.
+# Existing response keys used by SRS_QUT.
 SUMMARY_KEYS = {
     "id", "name", "uploaded_sample_code", "source_filename", "method", "status",
     "created_at", "completed_at", "match_count", "sample_count", "sample_codes",
@@ -34,7 +26,7 @@ MATCH_KEYS = {"id", "rank", "similarity_score"}
 
 @override_settings(SRS_API_SHARED_KEY="test-shared-key")
 class PersistenceTestCase(TestCase):
-    """Shared fixture: a small library with deposits, so confidence has data."""
+    """Create a small reference library for persistence tests."""
 
     def setUp(self):
         self.client.defaults["HTTP_X_SRS_API_KEY"] = "test-shared-key"
@@ -109,13 +101,13 @@ class PersistenceTestCase(TestCase):
 
 
 class RunProvenanceTests(PersistenceTestCase):
-    """What was recorded about the run itself."""
+    """Check the settings recorded for each run."""
 
     def test_provenance_is_written_as_real_columns(self):
         full_analysis = self.run_analysis("knn_aitchison")
 
         self.assertEqual(full_analysis.algorithm_id, "knn_aitchison")
-        self.assertEqual(full_analysis.algorithm_version, "1.0.0")
+        self.assertEqual(full_analysis.algorithm_version, "1.0.1")
         self.assertEqual(full_analysis.pipeline_version, PIPELINE_VERSION)
         self.assertEqual(full_analysis.reference_library_version, "1:OSNACA v1")
 
@@ -126,16 +118,11 @@ class RunProvenanceTests(PersistenceTestCase):
         self.assertGreaterEqual(full_analysis.runtime_ms, 0.0)
 
     def test_an_unknown_method_records_what_actually_ran(self):
-        """
-        The request asked for something that does not exist, so the default
-        ran. Recording the requested name would make the stored run a lie.
-        """
         full_analysis = self.run_analysis("not_a_real_method")
 
         self.assertEqual(full_analysis.algorithm_id, "log_difference_similarity")
 
     def test_provenance_columns_are_queryable(self):
-        """The reason these are columns rather than keys in the JSON blob."""
         self.run_analysis("knn_aitchison")
         self.run_analysis("log_difference_similarity")
 
@@ -176,7 +163,7 @@ class RunProvenanceTests(PersistenceTestCase):
 
 
 class MatchDetailTests(PersistenceTestCase):
-    """The per-match blocks, and the size limit that governs them."""
+    """Check optional metrics, evidence and confidence fields."""
 
     def matches(self, full_analysis):
         return list(
@@ -186,10 +173,6 @@ class MatchDetailTests(PersistenceTestCase):
         )
 
     def test_an_algorithm_with_no_extra_output_stores_nothing_extra(self):
-        """
-        The concentration-based methods offer no raw metrics, confidence, or
-        evidence, so their rows stay exactly as compact as they were.
-        """
         matches = self.matches(self.run_analysis("log_difference_similarity"))
 
         for match in matches:
@@ -217,10 +200,6 @@ class MatchDetailTests(PersistenceTestCase):
             self.assertEqual(set(entry), {"element", "contribution", "imputed"})
 
     def test_detail_is_limited_to_the_configured_number_of_matches(self):
-        """
-        The size decision, enforced. Evidence is about 3.4 KB per row, and a
-        real analysis ranks hundreds of references per sample.
-        """
         matches = self.matches(
             self.run_analysis("knn_aitchison", detail_top_n=2)
         )
@@ -230,8 +209,14 @@ class MatchDetailTests(PersistenceTestCase):
         self.assertIsNotNone(matches[1].evidence)
         self.assertIsNone(matches[2].evidence)
 
+    def test_detail_limit_is_independent_of_the_confidence_neighbour_count(self):
+        matches = self.matches(
+            self.run_analysis("knn_aitchison", detail_top_n=3, k=1)
+        )
+
+        self.assertTrue(all(match.scores is not None for match in matches))
+
     def test_ranking_is_unaffected_by_how_much_detail_is_stored(self):
-        """Detail is attached after ranking, so it cannot influence it."""
         full = self.matches(self.run_analysis("knn_aitchison", detail_top_n=10))
         limited = self.matches(self.run_analysis("knn_aitchison", detail_top_n=1))
 
@@ -241,7 +226,6 @@ class MatchDetailTests(PersistenceTestCase):
         )
 
     def test_confidence_reflects_the_deposits_of_the_nearest_references(self):
-        """Two of the three references are Woodlawn, and both rank above Other."""
         matches = self.matches(self.run_analysis("knn_aitchison"))
         by_deposit = {
             match.reference_sample.reference_deposit.three_char_code: match
@@ -253,12 +237,7 @@ class MatchDetailTests(PersistenceTestCase):
 
 
 class BackwardsCompatibilityTests(PersistenceTestCase):
-    """
-    The hard constraint: the separate frontend repository must keep working.
-
-    Every key it reads is asserted present, and the pre-existing match keys are
-    asserted to be exactly what they were for an algorithm that adds nothing.
-    """
+    """Keep response fields used by the SRS_QUT frontend unchanged."""
 
     def test_the_analysis_list_keeps_every_key_it_had(self):
         self.run_analysis()
@@ -284,7 +263,6 @@ class BackwardsCompatibilityTests(PersistenceTestCase):
         }.issubset(payload["analysed_samples"][0]))
 
     def test_a_ranked_match_is_unchanged_for_an_algorithm_adding_nothing(self):
-        """Byte-for-byte the old shape, not merely a superset of it."""
         full_analysis = self.run_analysis("log_difference_similarity")
 
         payload = self.client.get(
@@ -334,10 +312,7 @@ class BackwardsCompatibilityTests(PersistenceTestCase):
         )
 
     def test_an_analysis_saved_before_this_phase_still_serialises(self):
-        """
-        Rows that predate the migration have empty provenance and null detail.
-        Reading one must not fail.
-        """
+        """Read an older row with empty provenance and detail fields."""
         legacy = FullAnalysis.objects.create(
             name="Legacy", uploaded_sample_code="OLD",
             sample_data={"samples": [{"sample_code": "OLD", "measurements": []}]},

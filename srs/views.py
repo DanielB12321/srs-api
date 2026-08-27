@@ -1,10 +1,12 @@
+"""Standard model endpoints registered with the API router."""
+
+from django.db.models import Count
 from rest_framework import viewsets
 
 from .models import (
-    Mineral, 
     DepositClassification,
-    Dataset,
     Element,
+    Mineral,
     ReferenceDeposit,
     ReferenceSample,
     ReferenceSampleMeasurement,
@@ -13,21 +15,15 @@ from .models import (
 )
 
 from .serializers import (
-    DatasetSerializer,
+    DepositClassificationSerializer,
     ElementSerializer,
+    MineralSerializer,
     ReferenceDepositSerializer,
     ReferenceSampleMeasurementSerializer,
     ReferenceSampleSerializer,
     SampleMeasurementSerializer,
     SampleSerializer,
-    MineralSerializer,
-    DepositClassificationSerializer
 )
-
-
-class DatasetViewSet(viewsets.ModelViewSet):
-    queryset = Dataset.objects.all().order_by("-created_at")
-    serializer_class = DatasetSerializer
 
 
 class SampleViewSet(viewsets.ModelViewSet):
@@ -46,12 +42,20 @@ class ElementViewSet(viewsets.ModelViewSet):
 
 
 class ReferenceDepositViewSet(viewsets.ModelViewSet):
-    queryset = ReferenceDeposit.objects.all().order_by("name")
+    queryset = (
+        ReferenceDeposit.objects
+        .annotate(sample_count=Count("reference_samples"))
+        .order_by("name")
+    )
     serializer_class = ReferenceDepositSerializer
 
 
 class ReferenceSampleViewSet(viewsets.ModelViewSet):
-    queryset = ReferenceSample.objects.all().order_by("sample_code")
+    queryset = (
+        ReferenceSample.objects
+        .select_related("reference_deposit")
+        .order_by("sample_code")
+    )
     serializer_class = ReferenceSampleSerializer
 
 
@@ -60,7 +64,11 @@ class ReferenceSampleMeasurementViewSet(viewsets.ModelViewSet):
     serializer_class = ReferenceSampleMeasurementSerializer
 
     def get_queryset(self):
-        queryset = super().get_queryset().select_related("element", "reference_sample")
+        queryset = (
+            super()
+            .get_queryset()
+            .select_related("element", "reference_sample")
+        )
         reference_sample_id = self.request.query_params.get("reference_sample")
         if reference_sample_id:
             queryset = queryset.filter(reference_sample_id=reference_sample_id)
@@ -73,5 +81,8 @@ class MineralViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class DepositClassificationViewSet(viewsets.ReadOnlyModelViewSet):
-    queryset = DepositClassification.objects.all().order_by("deposit_class", "sub_class")
+    queryset = DepositClassification.objects.all().order_by(
+        "deposit_class",
+        "sub_class",
+    )
     serializer_class = DepositClassificationSerializer

@@ -1,7 +1,10 @@
-from django.conf import settings
+"""Database models for reference data, uploads and saved analyses."""
+
 from django.db import models
 
-# Reference Library Schema 
+
+# Reference library
+
 
 class ReferenceImport(models.Model):
     STATUS_PENDING = "pending"
@@ -22,7 +25,7 @@ class ReferenceImport(models.Model):
     metadata_file = models.FileField(upload_to="srs/reference_imports/")
     data_sha256 = models.CharField(max_length=255, blank=True)
     metadata_sha256 = models.CharField(max_length=255, blank=True)
-    
+
     status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,
@@ -41,7 +44,7 @@ class ReferenceImport(models.Model):
     def __str__(self):
         return f"{self.source_name}({self.status})"
 
-    
+
 class Element(models.Model):
     symbol = models.CharField(max_length=10, unique=True)
     name = models.CharField(max_length=100, blank=True)
@@ -59,7 +62,7 @@ class Mineral(models.Model):
     def __str__(self):
         return f"{self.name}({self.code})"
 
-    
+
 class DepositClassification(models.Model):
     deposit_class = models.CharField(max_length=100, db_column="class")
     sub_class = models.CharField(max_length=100, blank=True, db_column="sub_class")
@@ -67,12 +70,18 @@ class DepositClassification(models.Model):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["deposit_class", "sub_class"], name="depositclassification_class_subclass_uniq"),
+            models.UniqueConstraint(
+                fields=["deposit_class", "sub_class"],
+                name="depositclassification_class_subclass_uniq",
+            ),
         ]
 
     def __str__(self):
-        return f"{self.deposit_class} / {self.sub_class}" if self.sub_class else self.deposit_class
-    
+        if self.sub_class:
+            return f"{self.deposit_class} / {self.sub_class}"
+        return self.deposit_class
+
+
 class ReferenceDeposit(models.Model):
     import_ref = models.ForeignKey(
         ReferenceImport,
@@ -181,7 +190,9 @@ class ReferenceSampleMeasurement(models.Model):
         method = f" [{self.analytical_method}]" if self.analytical_method else ""
         return f"{self.reference_sample} - {self.element}{method}: {self.value}"
 
-# Pre-existing models below   
+
+# Uploaded datasets
+
 
 class Dataset(models.Model):
     STATUS_PENDING = "pending"
@@ -226,6 +237,7 @@ class Dataset(models.Model):
     def __str__(self):
         return self.name
 
+
 class Sample(models.Model):
     dataset = models.ForeignKey(
         Dataset,
@@ -243,16 +255,6 @@ class Sample(models.Model):
 
     def __str__(self):
         return self.sample_code
-
-
-# class Element(models.Model):
-#     symbol = models.CharField(max_length=10, unique=True)
-#     name = models.CharField(max_length=100, blank=True)
-#     atomic_number = models.PositiveIntegerField(null=True, blank=True)
-#     default_unit = models.CharField(max_length=50, blank=True)
-
-#     def __str__(self):
-#         return self.symbol
 
 
 class SampleMeasurement(models.Model):
@@ -278,75 +280,12 @@ class SampleMeasurement(models.Model):
         return f"{self.sample} - {self.element}: {self.value}"
 
 
-# class ReferenceDeposit(models.Model):
-#     name = models.CharField(max_length=255)
-#     deposit_type = models.CharField(max_length=100, blank=True)
-#     mineral_system = models.CharField(max_length=100, blank=True)
-#     country = models.CharField(max_length=100, blank=True)
-#     state_region = models.CharField(max_length=100, blank=True)
-#     description = models.TextField(blank=True)
-#     source = models.CharField(max_length=255, blank=True)
-#     created_at = models.DateTimeField(auto_now_add=True)
-#     updated_at = models.DateTimeField(auto_now=True)
-
-#     def __str__(self):
-#         return self.name
-
-
-# class ReferenceSample(models.Model):
-#     reference_deposit = models.ForeignKey(
-#         ReferenceDeposit,
-#         on_delete=models.CASCADE,
-#         related_name="reference_samples",
-#         null=True,
-#         blank=True,
-#     )
-#     sample_code = models.CharField(max_length=100)
-#     latitude = models.FloatField(null=True, blank=True)
-#     longitude = models.FloatField(null=True, blank=True)
-#     sample_type = models.CharField(max_length=100, blank=True)
-#     source_dataset = models.CharField(max_length=255, blank=True)
-#     source_reference = models.TextField(blank=True)
-#     metadata = models.JSONField(default=dict, blank=True)
-#     created_at = models.DateTimeField(auto_now_add=True)
-
-#     class Meta:
-#         unique_together = ("reference_deposit", "sample_code")
-
-#     def __str__(self):
-#         return self.sample_code
-
-
-# class ReferenceSampleMeasurement(models.Model):
-#     reference_sample = models.ForeignKey(
-#         ReferenceSample,
-#         on_delete=models.CASCADE,
-#         related_name="measurements",
-#     )
-#     element = models.ForeignKey(
-#         Element,
-#         on_delete=models.CASCADE,
-#         related_name="reference_measurements",
-#     )
-#     value = models.FloatField(null=True, blank=True)
-#     unit = models.CharField(max_length=50, blank=True)
-#     below_detection_limit = models.BooleanField(default=False)
-#     detection_limit = models.FloatField(null=True, blank=True)
-
-#     class Meta:
-#         unique_together = ("reference_sample", "element")
-
-#     def __str__(self):
-#         return f"{self.reference_sample} - {self.element}: {self.value}"
+# Saved analyses
 
 
 class FullAnalysis(models.Model):
-    """
-    One complete comparison requested by a user.
+    """One saved request to compare uploaded samples with the library."""
 
-    Test-sample measurements and ranked matches are stored in the related
-    FullAnalysisInputMeasurement and FullAnalysisMatch tables.
-    """
     STATUS_PENDING = "pending"
     STATUS_RUNNING = "running"
     STATUS_COMPLETED = "completed"
@@ -404,7 +343,7 @@ class FullAnalysis(models.Model):
 
 
 class FullAnalysisInputMeasurement(models.Model):
-    """One element reading submitted as part of the uploaded/test sample."""
+    """A legacy input reading kept for older single-sample analyses."""
 
     full_analysis = models.ForeignKey(
         FullAnalysis,
@@ -430,12 +369,8 @@ class FullAnalysisInputMeasurement(models.Model):
 
 
 class FullAnalysisMatch(models.Model):
-    """
-    A compact ranked result.
+    """A ranked reference match and its optional supporting detail."""
 
-    Full reference-sample data is not copied here. The foreign key stores its ID,
-    while this row stores only the position and calculated similarity score.
-    """
     full_analysis = models.ForeignKey(
         FullAnalysis,
         on_delete=models.CASCADE,
@@ -455,15 +390,11 @@ class FullAnalysisMatch(models.Model):
     rank = models.PositiveIntegerField()
     similarity_score = models.FloatField()
 
-    # Algorithm-native metrics beside the normalised score, and how much the
-    # nearest references agree with this match. Both are small and are kept for
-    # every match.
+    # Optional metrics and nearest-reference confidence for detailed matches.
     scores = models.JSONField(null=True, blank=True)
     confidence = models.JSONField(null=True, blank=True)
 
-    # Per-element support for the match. Roughly 3.4 KB per row once populated,
-    # which is why it is stored only for the leading matches rather than for
-    # all of them. See the detail_top_n parameter.
+    # Per-element evidence is also limited by the ``detail_top_n`` parameter.
     evidence = models.JSONField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)

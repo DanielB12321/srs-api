@@ -1,12 +1,4 @@
-"""
-Tests for the benchmark harness, the projections, and the matrix path.
-
-The harness fixture is built so the correct answer is known by construction:
-four deposits, two of each class, two samples each. That makes the difference
-between the two protocols observable rather than merely asserted, because a
-query's sister sample is the nearest thing in the library and hiding it changes
-the answer.
-"""
+"""Tests for benchmarks, projections and whole-library algorithms."""
 
 from django.test import SimpleTestCase, TestCase
 
@@ -34,7 +26,7 @@ from ..projections import fit_pca, fit_tsne, project_points
 
 
 class ProtocolTests(SimpleTestCase):
-    """Which references a query is allowed to see. The heart of the harness."""
+    """Check which references each benchmark protocol can use."""
 
     def signatures(self):
         return [
@@ -49,8 +41,7 @@ class ProtocolTests(SimpleTestCase):
             self.signatures()[0], self.signatures(), LEAVE_ONE_SAMPLE_OUT
         )
 
-        # Sample 2 is from the same deposit and remains visible, which is
-        # exactly what makes this protocol optimistic.
+        # Sample-out keeps another sample from the same deposit.
         self.assertEqual([s["id"] for s in library], [2, 3, 4])
 
     def test_leave_one_deposit_out_hides_every_sister_sample(self):
@@ -74,7 +65,7 @@ class ProtocolTests(SimpleTestCase):
 
 
 class HarnessTests(TestCase):
-    """End to end against a library whose correct answers are known."""
+    """Run benchmarks against a small library with known classes."""
 
     def setUp(self):
         self.elements = {
@@ -114,10 +105,6 @@ class HarnessTests(TestCase):
         self.assertEqual(len({s["deposit_pk"] for s in signatures}), 4)
 
     def test_a_sample_without_a_class_is_excluded(self):
-        """
-        An unlabelled sample cannot be scored as a hit, and leaving it in the
-        library would let it displace one that can.
-        """
         unlabelled = ReferenceDeposit.objects.create(
             name="Unknown", three_char_code="UNK", deposit_type="",
         )
@@ -145,10 +132,6 @@ class HarnessTests(TestCase):
                 self.assertGreater(result.lift_over_baseline, 0.0)
 
     def test_the_harness_scores_every_registered_algorithm(self):
-        """
-        Only compare() is used, which is what lets this measure an algorithm it
-        has never heard of.
-        """
         signatures = load_signatures()
 
         for algorithm_id in ("log_difference_similarity", "correlation", "distance"):
@@ -199,7 +182,7 @@ class HarnessTests(TestCase):
 
 
 class PCATests(SimpleTestCase):
-    """The live projection, and the property that made it the choice."""
+    """Check fitting and reusing the PCA projection."""
 
     def rows(self):
         # Two groups differing in which element dominates, so a first component
@@ -228,13 +211,18 @@ class PCATests(SimpleTestCase):
         model = fit_pca(rows)
         positions = [model.project(row)[0] for row in rows]
 
-        self.assertLess(max(positions[:4]), min(positions[4:]))
+        first_centre = sum(positions[:4]) / 4
+        second_centre = sum(positions[4:]) / 4
+        self.assertGreater(abs(first_centre - second_centre), 2.0)
+
+    def test_component_signs_have_a_stable_orientation(self):
+        model = fit_pca(self.rows())
+
+        for component in model.components:
+            largest = max(component, key=abs)
+            self.assertGreaterEqual(largest, 0.0)
 
     def test_a_new_sample_is_placed_without_refitting(self):
-        """
-        The property t-SNE cannot offer, and the reason PCA runs live: an
-        uploaded sample enters the existing space with a dot product.
-        """
         model = fit_pca(self.rows())
 
         placed = model.project({"Cu": 105.0, "Zn": 10.0, "Au": 1.0})
@@ -245,7 +233,6 @@ class PCATests(SimpleTestCase):
         self.assertLessEqual(placed[0], max(group) + 1.0)
 
     def test_dilution_does_not_move_a_point(self):
-        """CLR again: the projection reads composition, not concentration."""
         model = fit_pca(self.rows())
 
         original = model.project({"Cu": 100.0, "Zn": 10.0, "Au": 1.0})
@@ -279,7 +266,7 @@ class PCATests(SimpleTestCase):
 
 
 class TSNETests(SimpleTestCase):
-    """Only a sanity check; the real validation is the offline command."""
+    """Check basic t-SNE output and repeatability."""
 
     def test_the_embedding_has_one_finite_point_per_input(self):
         vectors = [
@@ -310,12 +297,7 @@ class TSNETests(SimpleTestCase):
 
 
 class MatrixAlgorithm(SimilarityAlgorithm):
-    """
-    A non-pairwise algorithm, used to prove the whole-library path runs.
-
-    It scores by how far each reference sits from the centroid of the library,
-    which is deliberately something no pairwise comparison could compute.
-    """
+    """Test algorithm that scores references against the library centroid."""
 
     id = "test_matrix_algorithm"
     version = "0.1.0"
@@ -359,13 +341,7 @@ class MatrixAlgorithm(SimilarityAlgorithm):
 
 
 class MatrixExecutionPathTests(TestCase):
-    """
-    A non-pairwise algorithm must actually run, not silently misbehave.
-
-    Before this path existed, such an algorithm could be registered and
-    selected and would then fail, because the API only ever scored one
-    reference at a time.
-    """
+    """Check the API path for algorithms that need the whole library."""
 
     def setUp(self):
         self.view = FullAnalysisListCreateView()

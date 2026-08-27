@@ -31,27 +31,22 @@ class Command(BaseCommand):
             choices=PROTOCOLS,
             help=(
                 "Evaluation protocol; repeatable. Defaults to leave-one-deposit-out, "
-                "which is the honest one."
+                "which is the stricter option."
             ),
         )
         parser.add_argument(
             "--max-queries",
             type=int,
             default=400,
-            help=(
-                "Sample this many queries. 0 evaluates all. Below roughly 300 "
-                "the gap between the two leading algorithms is inside the "
-                "sampling noise, so a small run can rank them the wrong way."
-            ),
+            help="Sample this many queries with a fixed seed. 0 evaluates all.",
         )
         parser.add_argument(
             "--seed",
             type=int,
             default=7,
             help=(
-                "Seed for the query sample. Every algorithm sees the same "
-                "queries, so a comparison is never also a comparison of two "
-                "different random subsets. Vary it to check a result is stable."
+                "Seed used when sampling queries. Every algorithm receives the "
+                "same subset."
             ),
         )
         parser.add_argument(
@@ -143,13 +138,11 @@ class Command(BaseCommand):
 
         best = max(results, key=lambda result: (result.top_1, result.top_5))
         self.stdout.write(self.style.SUCCESS(
-            f"best: {best.algorithm_id} ({best.protocol}) "
+            f"highest score: {best.algorithm_id} ({best.protocol}) "
             f"top-1 {best.top_1:.1%}, top-5 {best.top_5:.1%}"
         ))
 
-        # A ranking decided by fewer queries than the gap between the top two
-        # can support is not a ranking. Say so rather than letting the table
-        # imply more precision than it has.
+        # Flag a small lead when it is close to the rough sampling error.
         contenders = sorted(
             (r for r in results if r.protocol == best.protocol),
             key=lambda result: -result.top_1,
@@ -157,10 +150,7 @@ class Command(BaseCommand):
         if len(contenders) >= 2:
             leader = contenders[0]
             gap = leader.top_1 - contenders[1].top_1
-            # Standard error of the leader's own accuracy. A rough yardstick,
-            # not a significance test: both algorithms answer the same queries,
-            # so the error on the difference is smaller than this. It is here to
-            # prompt a re-run when a gap is obviously too small to trust.
+            # This is a quick warning, not a paired significance test.
             standard_error = (
                 leader.top_1 * (1 - leader.top_1) / max(1, leader.n_queries)
             ) ** 0.5
@@ -172,18 +162,17 @@ class Command(BaseCommand):
                     f"another --seed before calling one better."
                 ))
 
-        # A result near the baseline means the algorithm is not working, and a
-        # very high deposit-out result usually means the protocol leaked.
+        # Highlight results that need another check before they are reported.
         for result in results:
             if result.top_1 <= baseline:
                 self.stdout.write(self.style.ERROR(
                     f"  {result.algorithm_id} ({result.protocol}) does not beat "
-                    f"the baseline. Treat it as broken."
+                    f"the baseline in this run."
                 ))
             elif result.protocol == LEAVE_ONE_DEPOSIT_OUT and result.top_1 > 0.69:
                 self.stdout.write(self.style.WARNING(
                     f"  {result.algorithm_id} scores {result.top_1:.1%} on the "
-                    f"deposit-out protocol. Check for leakage."
+                    f"deposit-out protocol. Verify the evaluation split."
                 ))
 
         if per_class:

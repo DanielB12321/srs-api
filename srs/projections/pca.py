@@ -1,27 +1,12 @@
-"""
-Principal component analysis in pure Python, for plotting samples in CLR space.
-
-PCA is used for the live projection rather than something with better visual
-cluster separation because of one property: it produces a fixed linear map, so
-a newly uploaded sample can be placed into the library's existing space with a
-single dot product. Methods like t-SNE have no out-of-sample extension, and
-showing a user's sample would mean recomputing the whole embedding.
-
-The work is proportional to the number of elements squared, not the number of
-samples squared, and there are about 70 elements against more than a thousand
-samples. That is what keeps this affordable without a numeric library.
-"""
+"""Principal component projection of samples in CLR space."""
 
 from dataclasses import dataclass
 from math import log10, sqrt
 
-#: An element must appear in at least this share of samples to enter the
-#: analysis. PCA needs a complete matrix, and an element measured in a handful
-#: of samples would contribute mostly imputed values.
+# Minimum sample coverage required for an element to enter the projection.
 DEFAULT_MIN_COVERAGE = 0.9
 
-#: Guard for the Jacobi sweep. It converges in far fewer passes than this on a
-#: matrix of this size; the cap only stops a pathological input spinning.
+# Stops an unusual covariance matrix from looping indefinitely.
 _MAX_SWEEPS = 100
 
 
@@ -35,12 +20,7 @@ class PCAModel:
     explained_variance_ratio: list
 
     def project(self, values):
-        """
-        Place one sample into the fitted space.
-
-        Returns None when the sample shares too few elements with the fitted
-        suite for the position to mean anything.
-        """
+        """Project a sample, or return ``None`` when coverage is too low."""
         vector = _clr_vector(values, self.symbols, self.means)
         if vector is None:
             return None
@@ -53,13 +33,7 @@ class PCAModel:
 
 
 def _clr_vector(values, symbols, fallback):
-    """
-    Build a centred log-ratio vector over a fixed element suite.
-
-    Elements the sample is missing fall back to the suite mean, which is the
-    least-committal filler available: it moves the sample neither towards nor
-    away from anything along that axis.
-    """
+    """Build a CLR vector and fill missing elements with fitted means."""
     present = [values.get(symbol) for symbol in symbols]
     measured = [value for value in present if value is not None and value > 0]
 
@@ -77,14 +51,19 @@ def _clr_vector(values, symbols, fallback):
     ]
 
 
-def _jacobi_eigen(matrix):
-    """
-    Eigenvalues and eigenvectors of a symmetric matrix by Jacobi rotation.
+def _canonical_component(vector):
+    """Give an eigenvector a stable sign without changing its direction."""
+    if not vector:
+        return vector
 
-    Chosen over a general solver because a covariance matrix is symmetric by
-    construction, which makes this both simple and numerically well behaved.
-    Returns pairs sorted by descending eigenvalue.
-    """
+    largest = max(range(len(vector)), key=lambda index: abs(vector[index]))
+    if vector[largest] < 0:
+        return [-value for value in vector]
+    return vector
+
+
+def _jacobi_eigen(matrix):
+    """Return eigenpairs for a symmetric matrix using Jacobi rotations."""
     size = len(matrix)
     a = [row[:] for row in matrix]
     vectors = [
@@ -127,7 +106,10 @@ def _jacobi_eigen(matrix):
 
     eigenvalues = [a[i][i] for i in range(size)]
     pairs = [
-        (eigenvalues[i], [vectors[row][i] for row in range(size)])
+        (
+            eigenvalues[i],
+            _canonical_component([vectors[row][i] for row in range(size)]),
+        )
         for i in range(size)
     ]
     pairs.sort(key=lambda pair: -pair[0])
@@ -135,12 +117,7 @@ def _jacobi_eigen(matrix):
 
 
 def fit_pca(rows, n_components=2, min_coverage=DEFAULT_MIN_COVERAGE):
-    """
-    Fit a projection from an iterable of symbol-to-ppm mappings.
-
-    Returns None when the library is too small or too sparse to support a
-    projection, rather than producing axes that would be noise.
-    """
+    """Fit PCA, returning ``None`` when the input is too small or sparse."""
     rows = [row for row in rows if row]
     if len(rows) < n_components + 1:
         return None
@@ -160,8 +137,7 @@ def fit_pca(rows, n_components=2, min_coverage=DEFAULT_MIN_COVERAGE):
     if len(symbols) < n_components + 1:
         return None
 
-    # Two passes: the first establishes the centre, the second the covariance
-    # about it. Vectors are built once and reused between them.
+    # Build vectors once, then use them for the mean and covariance passes.
     vectors = []
     zero = [0.0] * len(symbols)
     for row in rows:
@@ -210,13 +186,7 @@ def fit_pca(rows, n_components=2, min_coverage=DEFAULT_MIN_COVERAGE):
 
 
 def project_points(model, entries):
-    """
-    Project labelled samples into a fitted space.
-
-    entries are (id, kind, values) triples, where kind distinguishes an
-    uploaded sample from a reference so a plot can style them differently.
-    Samples that cannot be placed are dropped rather than sent as nulls.
-    """
+    """Project ``(id, kind, values)`` entries, skipping unplaceable samples."""
     if model is None:
         return []
 

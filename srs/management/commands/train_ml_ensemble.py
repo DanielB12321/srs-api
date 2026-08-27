@@ -1,4 +1,4 @@
-"""Django management command for deliberate/offline ML ensemble retraining."""
+"""Train and save the optional ML ensemble model files."""
 
 from __future__ import annotations
 
@@ -12,8 +12,7 @@ from ...training.ml_ensemble_training import train_from_file
 
 class Command(BaseCommand):
     help = (
-        "Train the XGBoost + RBF-SVM SRS similarity ensemble using the shared "
-        "preprocessing head and write deployable model artifacts."
+        "Train the XGBoost and RBF-SVM ensemble and save its model files."
     )
 
     def add_arguments(self, parser):
@@ -27,8 +26,8 @@ class Command(BaseCommand):
             "--preprocessing-json",
             default=None,
             help=(
-                "Optional JSON file containing the same preprocessing request "
-                "block used by SRS. Omit to train with the shared head defaults."
+                "Optional JSON file containing SRS preprocessing settings. "
+                "Omit it to use the defaults."
             ),
         )
         parser.add_argument(

@@ -1,35 +1,14 @@
-"""
-The shared preprocessing head.
-
-Every algorithm receives values that came through here, which is what makes a
-benchmark compare algorithms rather than pipelines. No algorithm gets to
-preprocess more cleverly than its rivals, so a win on the leaderboard is a win
-for the algorithm.
-
-Two stages, deliberately separate:
-
-* extract_values() turns raw measurements into a symbol-to-ppm mapping. Unit
-  conversion, the censored-data policy, and the element selection live here.
-* prepare_vectors() turns two such mappings into aligned numeric vectors, the
-  imputed mask, and per-element weights.
-
-Defaults reproduce the behaviour that existed before this module. Every
-transform is opt-in through the request's preprocessing block, so an existing
-client sees identical scores.
-"""
+"""Shared measurement cleanup and vector preparation for every algorithm."""
 
 from dataclasses import dataclass, field
 from math import log10
 
 from ..services.units import concentration_to_ppm
 
-#: Bumped whenever a transform changes in a way that moves scores. Stored with
-#: every run so an old result stays interpretable.
+# Stored with each run so previous results remain identifiable.
 PIPELINE_VERSION = "1.0"
 
-# How to treat a measurement reported as below the detection limit. Roughly 15%
-# of the reference library is censored this way, and every censored row carries
-# its detection limit, so substitution is always possible.
+# Ways to handle measurements below their detection limit.
 SKIP = "skip"
 HALF_DETECTION_LIMIT = "half_dl"
 DETECTION_LIMIT = "detection_limit"
@@ -55,26 +34,14 @@ def normalise_symbol(symbol):
 
 @dataclass
 class PreparedVectors:
-    """
-    Two aligned, transformed vectors plus everything an algorithm needs about
-    them.
-
-    Algorithms receive this object rather than a handful of positional
-    arguments, so a field can be added later without breaking any algorithm
-    written against the current interface. That matters when algorithms arrive
-    from different people at different times.
-    """
+    """Two aligned vectors and the metadata needed to score them."""
 
     symbols: list
     input_vector: list
     reference_vector: list
-    #: True where the value was substituted rather than measured. This is the
-    #: only source for the imputed flag on evidence entries.
+    # True when the value was substituted rather than measured.
     imputed: list = field(default_factory=list)
-    #: Per-element weights, or None when every element counts equally. None is
-    #: not the same as a list of ones: it selects the unweighted arithmetic, so
-    #: an equally weighted run is bit-for-bit what it was before weighting
-    #: existed.
+    # None keeps the original unweighted calculation.
     weights: list = None
     options: dict = field(default_factory=dict)
 
@@ -91,13 +58,7 @@ class PreparedVectors:
 
 
 def resolve_options(preprocessing=None, selected_elements=None):
-    """
-    Validate the request's preprocessing block into a complete options dict.
-
-    Unrecognised policy names fall back to the default rather than raising. The
-    preprocessing block is free-form JSON sent by a separate frontend, so a
-    typo or a newer client's unknown value must never take an analysis down.
-    """
+    """Return a complete and valid preprocessing options dictionary."""
     preprocessing = preprocessing or {}
 
     censored_policy = preprocessing.get("handle_missing") or SKIP
@@ -113,9 +74,12 @@ def resolve_options(preprocessing=None, selected_elements=None):
         for symbol in (selected_elements or [])
     ]
 
+    normalise = bool(preprocessing.get("normalise"))
+
     return {
-        "normalise": bool(preprocessing.get("normalise")),
-        "log_transform": bool(preprocessing.get("log_transform")),
+        "normalise": normalise,
+        # CLR already works in log space, so a second log transform is not used.
+        "log_transform": bool(preprocessing.get("log_transform")) and not normalise,
         "handle_missing": censored_policy,
         "weighting_mode": weighting_mode,
         "selected_elements": [symbol for symbol in symbols if symbol],
@@ -123,12 +87,7 @@ def resolve_options(preprocessing=None, selected_elements=None):
 
 
 def _read_measurement(measurement):
-    """
-    Read one measurement from either a request dict or a database row.
-
-    Input samples arrive as JSON dicts and reference samples as model
-    instances. Normalising both here keeps the policy logic below written once.
-    """
+    """Read the common fields from a request dictionary or model instance."""
     if isinstance(measurement, dict):
         return (
             normalise_symbol(
@@ -159,28 +118,18 @@ def _censored_value(detection_limit, unit, censored_policy):
         return None
 
     if censored_policy == HALF_DETECTION_LIMIT:
-        # Substituting half the detection limit is the standard compromise: the
-        # true value lies somewhere in [0, limit], and zero cannot be logged.
+        # Half the limit avoids introducing zero, which cannot be logged.
         return limit / 2
 
     return limit
 
 
 def extract_values(measurements, options=None):
-    """
-    Turn raw measurements into a symbol-to-ppm mapping.
-
-    Returns the mapping and the set of symbols whose value was substituted
-    rather than measured. Values that cannot be compared honestly, such as an
-    unsupported unit or a non-positive concentration, are left out entirely
-    rather than being coerced onto the wrong scale.
-    """
+    """Return ppm values and the symbols whose values were substituted."""
     options = options or resolve_options()
     censored_policy = options.get("handle_missing", SKIP)
 
-    # A hard filter, unless the weighting mode says to treat the selection as a
-    # preference. Boosting selected elements would be meaningless if everything
-    # else had already been discarded.
+    # Boost mode keeps unselected elements so the selected ones can be weighted.
     selected = set(options.get("selected_elements") or [])
     restrict_to_selected = bool(selected) and (
         options.get("weighting_mode") != SELECTED_BOOST
@@ -224,13 +173,7 @@ def _centred_logs(values):
 
 
 def _weights_for(symbols, options):
-    """
-    Return per-element weights, or None when they would all be equal.
-
-    Returning None rather than a list of ones is deliberate: it routes scoring
-    through the original unweighted arithmetic, so enabling this feature cannot
-    perturb a run that does not use it.
-    """
+    """Return element weights, or ``None`` when all weights are equal."""
     if options.get("weighting_mode") != SELECTED_BOOST:
         return None
 
@@ -256,13 +199,7 @@ def prepare_vectors(
     options=None,
     imputed_elements=None,
 ):
-    """
-    Turn two symbol-to-value mappings into aligned, transformed vectors.
-
-    Sorting the symbols is what keeps the two vectors aligned element by
-    element, and it makes the result independent of the order measurements
-    happened to arrive in.
-    """
+    """Build aligned vectors from the elements shared by two samples."""
     options = options or resolve_options()
     imputed_elements = imputed_elements or set()
     symbols = sorted(common_elements)
@@ -271,8 +208,7 @@ def prepare_vectors(
     reference_vector = [reference_values[symbol] for symbol in symbols]
 
     if options.get("normalise"):
-        # CLR centres each sample on its own geometric mean, removing overall
-        # concentration and leaving the relative pattern.
+        # CLR keeps relative element patterns rather than overall concentration.
         input_vector = _centred_logs(input_vector)
         reference_vector = _centred_logs(reference_vector)
     elif options.get("log_transform"):
@@ -290,12 +226,7 @@ def prepare_vectors(
 
 
 def describe(options, symbols=None):
-    """
-    Summarise the pipeline configuration for the run block of the envelope.
-
-    This is what makes a stored result reproducible: the pipeline version plus
-    the exact policies and element suite that produced it.
-    """
+    """Describe the preprocessing settings stored with an analysis run."""
     options = options or resolve_options()
     symbols = list(symbols or [])
 

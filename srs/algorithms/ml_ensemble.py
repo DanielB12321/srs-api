@@ -1,22 +1,10 @@
-"""Learned pairwise similarity using a soft-voting XGBoost + RBF-SVM ensemble.
-
-This module is intentionally inference-only. Raw geochemical preprocessing is
-owned by the shared SRS preprocessing head in ``srs.preprocessing`` and is
-applied by ``PairwiseSimilarity`` before ``score_vectors`` is called.
-
-The ensemble is trained offline with the matching management command and saves
-its learned parameters under ``srs/models/ml_ensemble``.
-"""
+"""Inference adapter for the trained XGBoost and SVM ensemble."""
 
 from __future__ import annotations
 
 import json
 from functools import lru_cache
 from pathlib import Path
-
-import joblib
-import numpy as np
-from xgboost import XGBClassifier
 
 from .base import PairwiseSimilarity
 
@@ -30,14 +18,25 @@ MODEL_DIRECTORY = (
 EXPECTED_FEATURE_COUNT = 20
 
 
-def make_pair_features(prepared) -> np.ndarray:
-    """Convert one already-preprocessed pair to a fixed-length ML feature row.
+class AlgorithmUnavailableError(RuntimeError):
+    """Raised when the optional ML model cannot be used on this installation."""
 
-    ``prepared`` is the object produced by the shared preprocessing head. These
-    are model features derived from that output; this function does not perform
-    raw-value imputation, censor handling, log transformation, CLR, selection,
-    or weighting policy resolution.
-    """
+
+def _load_numpy():
+    """Import NumPy only when the ML algorithm is used."""
+    try:
+        import numpy as np
+    except (ImportError, OSError) as exc:
+        raise AlgorithmUnavailableError(
+            "The ML ensemble is unavailable because its optional dependencies "
+            "are not installed. Install the packages from requirements.txt."
+        ) from exc
+    return np
+
+
+def make_pair_features(prepared):
+    """Convert one prepared sample pair to the model's 20 input features."""
+    np = _load_numpy()
     left = np.asarray(prepared.input_vector, dtype=float)
     right = np.asarray(prepared.reference_vector, dtype=float)
 
@@ -124,6 +123,15 @@ def make_pair_features(prepared) -> np.ndarray:
 @lru_cache(maxsize=1)
 def _load_artifacts():
     """Load trained model files once per Python worker process."""
+    try:
+        import joblib
+        from xgboost import XGBClassifier
+    except (ImportError, OSError) as exc:
+        raise AlgorithmUnavailableError(
+            "The ML ensemble is unavailable because its optional dependencies "
+            "are not installed. Install the packages from requirements.txt."
+        ) from exc
+
     paths = {
         "xgb": MODEL_DIRECTORY / "xgb_model.json",
         "svm": MODEL_DIRECTORY / "svm_pipeline.joblib",
@@ -132,46 +140,42 @@ def _load_artifacts():
 
     missing = [str(path) for path in paths.values() if not path.exists()]
     if missing:
-        raise FileNotFoundError(
-            "ML ensemble has not been trained/deployed. Missing: "
+        raise AlgorithmUnavailableError(
+            "The ML ensemble is unavailable because model files are missing: "
             + ", ".join(missing)
         )
 
-    xgb_model = XGBClassifier()
-    xgb_model.load_model(paths["xgb"])
-    svm_pipeline = joblib.load(paths["svm"])
+    try:
+        xgb_model = XGBClassifier()
+        xgb_model.load_model(paths["xgb"])
+        svm_pipeline = joblib.load(paths["svm"])
 
-    with paths["manifest"].open("r", encoding="utf-8") as file:
-        manifest = json.load(file)
+        with paths["manifest"].open("r", encoding="utf-8") as file:
+            manifest = json.load(file)
+    except Exception as exc:
+        raise AlgorithmUnavailableError(
+            f"The ML ensemble model files could not be loaded: {exc}"
+        ) from exc
 
     feature_count = int(manifest.get("feature_count", -1))
     if feature_count != EXPECTED_FEATURE_COUNT:
-        raise RuntimeError(
-            "ML ensemble artifact feature definition does not match runtime "
-            f"code: artifact={feature_count}, runtime={EXPECTED_FEATURE_COUNT}."
+        raise AlgorithmUnavailableError(
+            "The ML ensemble feature definition does not match the current code: "
+            f"artifact={feature_count}, runtime={EXPECTED_FEATURE_COUNT}."
         )
 
     return xgb_model, svm_pipeline, manifest
 
 
 class XgbSvmEnsembleSimilarity(PairwiseSimilarity):
-    """Learn whether an input/reference pair represents the same deposit class.
-
-    XGBoost and an RBF-SVM independently estimate the probability that the two
-    shared-preprocessed signatures belong to the same labelled mineral-deposit
-    class. Their probabilities are combined with the soft-voting weights chosen
-    during deposit-grouped cross-validation.
-
-    Normalisation: the returned similarity is the ensemble probability in
-    ``[0, 1]``. A larger value means stronger learned evidence that the input
-    and reference signatures correspond to the same deposit class.
-    """
+    """Estimate the probability that two samples share a deposit class."""
 
     id = "xgboost_rbf_svm_ensemble"
     version = "1.0.0"
     capabilities = frozenset()
 
     def score_vectors(self, prepared):
+        np = _load_numpy()
         xgb_model, svm_pipeline, manifest = _load_artifacts()
         features = make_pair_features(prepared).reshape(1, -1)
 

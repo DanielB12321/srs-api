@@ -1,22 +1,13 @@
-"""
-Seed the static reference-library lookup tables:
-    Element                  - from importers.seed_data.ELEMENTS
-    Mineral                  - from the OSNACA Metadata workbook (Mineral Codes sheet)
-    DepositClassification    - from the OSNACA Metadata workbook (Ore Deposit Classification)
+"""Seed reference-library lookup tables."""
 
-Usage:
-    python manage.py seed_reference_lookups
-    python manage.py seed_reference_lookups --metadata path/to/OSNACA-Metadata.xlsx
-
-Idempotent: safe to re-run.  Existing rows are updated, not duplicated.
-"""
 from pathlib import Path
 
 import openpyxl
 from django.core.management.base import BaseCommand, CommandError
 
-from srs.importers.seed_data import ELEMENTS
-from srs.models import DepositClassification, Element, Mineral
+from ...importers.seed_data import ELEMENTS
+from ...models import DepositClassification, Element, Mineral
+
 
 class Command(BaseCommand):
     help = "Seed Element / Mineral / DepositClassification lookup tables."
@@ -45,19 +36,22 @@ class Command(BaseCommand):
             )
             return
 
-        if not metadata_path.exists():
+        if not metadata_path.is_file():
             raise CommandError(f"Metadata file not found: {metadata_path}")
 
         wb = openpyxl.load_workbook(metadata_path, read_only=True, data_only=True)
+        try:
+            minerals = self._seed_minerals(wb)
+            self.stdout.write(self.style.SUCCESS(
+                f"Mineral: {minerals} rows upserted."
+            ))
 
-        minerals = self._seed_minerals(wb)
-        self.stdout.write(self.style.SUCCESS(f"Mineral: {minerals} rows upserted."))
-
-        classifications = self._seed_classifications(wb)
-        self.stdout.write(self.style.SUCCESS(
-            f"DepositClassification: {classifications} rows upserted."
-        ))
-
+            classifications = self._seed_classifications(wb)
+            self.stdout.write(self.style.SUCCESS(
+                f"DepositClassification: {classifications} rows upserted."
+            ))
+        finally:
+            wb.close()
 
     def _seed_elements(self) -> int:
         count = 0

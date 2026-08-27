@@ -1,3 +1,5 @@
+"""Tests for concentration-unit conversion."""
+
 from django.test import SimpleTestCase
 
 from ..services.units import concentration_to_ppm
@@ -12,3 +14,11 @@ class ConcentrationConversionTests(SimpleTestCase):
 
     def test_unknown_units_are_not_silently_compared(self):
         self.assertIsNone(concentration_to_ppm(10, "mol/L"))
+
+    def test_non_finite_values_are_rejected(self):
+        self.assertIsNone(concentration_to_ppm(float("nan"), "ppm"))
+        self.assertIsNone(concentration_to_ppm(float("inf"), "ppm"))
+        self.assertIsNone(concentration_to_ppm(float("-inf"), "ppm"))
+
+    def test_conversion_overflow_is_rejected(self):
+        self.assertIsNone(concentration_to_ppm(1e308, "pct"))

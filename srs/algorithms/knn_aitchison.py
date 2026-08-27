@@ -1,4 +1,4 @@
-"""Compositional similarity: Aitchison distance in CLR space, with Spearman rho."""
+"""Aitchison similarity with Spearman correlation and match evidence."""
 
 from math import log10, sqrt
 
@@ -6,12 +6,10 @@ from ..preprocessing import prepare_vectors, resolve_options
 from .base import PairwiseSimilarity, weighted_dot
 from .envelope import Evidence
 
-#: How many nearest references vote on a match's confidence.
+# Number of nearby references used for confidence.
 DEFAULT_K = 5
 
-#: Evidence, raw metrics, and confidence are attached to this many matches.
-#: Computing them for a full ranking of every reference would multiply the row
-#: size of a result set that already runs to hundreds of rows per sample.
+# Detailed evidence is stored only for the leading matches.
 DEFAULT_DETAIL_TOP_N = 10
 
 _LEVEL_THRESHOLDS = ((0.6, "high"), (0.3, "medium"))
@@ -61,61 +59,27 @@ def _centred(values):
 
 
 class KnnAitchisonSimilarity(PairwiseSimilarity):
-    """
-    Compare samples as compositions rather than as lists of concentrations.
+    """Compare element ratios using distance in centred log-ratio space.
 
-    Geochemical measurements are compositional: only the ratios between
-    elements carry information, because the absolute values depend on how much
-    of the sample was dissolved and how it was reported. The centred log-ratio
-    transform is the standard way to work in that space, and the Aitchison
-    distance is the Euclidean distance between two CLR vectors. Two samples
-    with the same element ratios sit at distance zero however concentrated
-    either one is.
-
-    This applies the CLR itself when preprocessing has not, so the algorithm is
-    correct whichever transform the request selected. Closure, rescaling a
-    composition to a constant sum, is deliberately not applied: the CLR centres
-    on the geometric mean and is therefore already scale-invariant, so closure
-    before it would be an exact no-op.
-
-    Spearman's rho is reported alongside as a raw metric. It measures whether
-    the two samples order their elements the same way, which is a different
-    question from how far apart they sit, so a pair can be distant yet strongly
-    rank-correlated.
-
-    Normalisation: the Aitchison distance is unbounded above, and is mapped to
-    a similarity with 1 / (1 + distance). That is monotone decreasing, so
-    ranking and rank-based benchmark metrics are unaffected by the choice, and
-    bounded to (0, 1] with 1 meaning compositionally identical.
-
-    Be aware that these similarities are much lower in absolute terms than the
-    concentration-based methods produce, because Aitchison distances across a
-    diverse reference library are large. A user interface threshold tuned
-    against log_difference_similarity will look broken here. Compare
-    confidence.level between algorithms, never the raw score.
+    Similarity is ``1 / (1 + distance)``. Spearman correlation is included as a
+    separate measure of whether the two samples order their elements similarly.
     """
 
     id = "knn_aitchison"
-    version = "1.0.0"
+    version = "1.0.1"
     capabilities = frozenset({"evidence"})
 
     def score_vectors(self, prepared):
         left, right = self._clr_pair(prepared)
         differences = [a - b for a, b in zip(left, right)]
 
-        # Weighted Euclidean when weights are present, plain Euclidean when
-        # they are not, which is what weighted_dot handles for us.
+        # ``weighted_dot`` keeps selected-element weights in the distance.
         distance = sqrt(weighted_dot(differences, differences, prepared.weights))
 
         return 1 / (1 + distance)
 
     def _clr_pair(self, prepared):
-        """
-        Return both vectors in CLR space, whatever preprocessing already did.
-
-        The user picks the algorithm and the preprocessing independently, so
-        this cannot assume the request happened to enable CLR.
-        """
+        """Return both vectors in CLR space without applying a transform twice."""
         options = prepared.options
 
         if options.get("normalise"):
@@ -137,9 +101,8 @@ class KnnAitchisonSimilarity(PairwiseSimilarity):
         differences = [a - b for a, b in zip(left, right)]
         distance = sqrt(weighted_dot(differences, differences, prepared.weights))
 
-        # Rank correlation is left unweighted. A weighted rank correlation is
-        # not a standard quantity, and inventing one would make the reported
-        # metric hard to compare with anything published.
+        # Spearman correlation remains unweighted because weighted ranks are not
+        # part of the score and would be difficult to interpret.
         rho = (
             _pearson(_average_ranks(left), _average_ranks(right))
             if len(left) >= 2
@@ -149,20 +112,17 @@ class KnnAitchisonSimilarity(PairwiseSimilarity):
         return {"aitchison_distance": distance, "spearman_rho": rho}
 
     def evidence(self, prepared):
-        """
-        Split the distance into per-element contributions.
-
-        Every element adds its squared CLR difference to the total. An element
-        that differs less than the average pulls the pair together and is
-        reported as supporting; one that differs more pushes them apart and is
-        reported as conflicting. Contributions are scaled to sum to one in
-        absolute value so they can be read as shares of the disagreement.
-        """
+        """Split weighted CLR disagreement into supporting and conflicting elements."""
         left, right = self._clr_pair(prepared)
         squared = [(a - b) ** 2 for a, b in zip(left, right)]
-        mean_squared = sum(squared) / len(squared)
+        weights = prepared.weights or [1.0] * len(squared)
+        weighted_squared = [
+            weight * value
+            for weight, value in zip(weights, squared)
+        ]
+        mean_squared = sum(weighted_squared) / len(weighted_squared)
 
-        raw = [mean_squared - value for value in squared]
+        raw = [mean_squared - value for value in weighted_squared]
         total = sum(abs(value) for value in raw)
 
         supporting = []
@@ -181,23 +141,14 @@ class KnnAitchisonSimilarity(PairwiseSimilarity):
             else:
                 conflicting.append(entry)
 
-        # Strongest first on each side, so a consumer showing only the top few
-        # shows the ones that actually moved the result.
+        # Keep the strongest entries first for compact result displays.
         supporting.sort(key=lambda item: -item.contribution)
         conflicting.sort(key=lambda item: item.contribution)
 
         return supporting, conflicting
 
     def compare(self, samples, references, config=None):
-        """
-        Rank as usual, then attach the detail only this algorithm can produce.
-
-        Raw metrics, evidence, and kNN confidence are computed for the leading
-        matches rather than for every reference. Ranking already used all of
-        them, so nothing is lost from the ordering; what is avoided is
-        attaching several blocks of detail to hundreds of rows that no one
-        opens.
-        """
+        """Rank references and add detail to the leading matches."""
         config = config or {}
         # Materialised before ranking so the references can be revisited below
         # even when a generator was passed in.
@@ -223,9 +174,7 @@ class KnnAitchisonSimilarity(PairwiseSimilarity):
             for reference in reference_list
         }
 
-        # Which deposits the k nearest references belong to. This is the kNN
-        # part: a match is more trustworthy when several samples from the same
-        # deposit independently rank near the top.
+        # Confidence rises when nearby references belong to the same deposit.
         nearest_deposits = [
             match.deposit_id or match.deposit_name
             for match in result.matches[:neighbours]

@@ -1,15 +1,6 @@
-"""
-Contract tests for the pluggable algorithm layer.
+"""Tests for the algorithm registry and shared result format."""
 
-The characterisation suite proves the extraction did not change any score.
-These prove the layer around it holds up: every registered algorithm satisfies
-the envelope contract, the registry resolves the way callers expect, and the
-view's delegation reaches the same code the classes expose directly.
-
-The envelope checks loop over the registry rather than naming algorithms, so an
-algorithm added later is held to the same contract without anyone remembering
-to write a test for it.
-"""
+from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase, TestCase, override_settings
 
@@ -62,14 +53,13 @@ REFERENCES = [
 
 
 class RegistryTests(SimpleTestCase):
-    """Resolution rules that callers and the API contract depend on."""
+    """Check algorithm registration and default selection."""
 
     def test_every_registered_algorithm_declares_its_identity(self):
         for algorithm_id, algorithm_class in ALGORITHMS.items():
             with self.subTest(algorithm=algorithm_id):
                 self.assertTrue(issubclass(algorithm_class, SimilarityAlgorithm))
-                # The registry key and the class attribute must agree, or
-                # provenance recorded against a run points at the wrong thing.
+                # The saved algorithm ID comes from this class attribute.
                 self.assertEqual(algorithm_class.id, algorithm_id)
                 self.assertTrue(algorithm_class.version)
                 self.assertTrue(algorithm_class.__doc__, "needs a docstring")
@@ -97,7 +87,6 @@ class RegistryTests(SimpleTestCase):
         self.assertEqual(get_algorithm(None).id, FALLBACK_ALGORITHM_ID)
 
     def test_instances_are_not_shared_between_calls(self):
-        """Analyses run on background threads, so state must not be shared."""
         self.assertIsNot(
             get_algorithm("log_difference_similarity"),
             get_algorithm("log_difference_similarity"),
@@ -121,12 +110,7 @@ class RegistryTests(SimpleTestCase):
 
 
 class ViewDelegationTests(SimpleTestCase):
-    """
-    The view must reach the extracted classes, not a copy of the arithmetic.
-
-    This is what stops the two paths drifting apart: if someone later edits an
-    algorithm module but the view keeps its own maths, these fail.
-    """
+    """Check that the API uses the registered algorithm classes."""
 
     def setUp(self):
         self.view = FullAnalysisListCreateView()
@@ -157,34 +141,27 @@ class ViewDelegationTests(SimpleTestCase):
                             ),
                         )
 
-    def test_the_view_holds_no_similarity_arithmetic(self):
-        """
-        Delegation, not a reimplementation.
+    @patch("srs.api_views.get_algorithm")
+    def test_the_view_delegates_similarity_scoring(self, get_algorithm_mock):
+        algorithm = Mock()
+        algorithm.score_pair.return_value = 0.42
+        get_algorithm_mock.return_value = algorithm
 
-        A tolerant ceiling rather than an exact line count, so ordinary edits do
-        not fail it, but pasting a formula back in would.
-        """
-        import inspect
+        result = self.view.calculate_similarity_score(
+            INPUT_VALUES,
+            REFERENCE_VALUES["identical"],
+            COMMON_ELEMENTS,
+            "distance",
+            {"normalise": True},
+        )
 
-        source = inspect.getsource(self.view.calculate_similarity_score)
-        body = [
-            line.strip()
-            for line in source.splitlines()
-            if line.strip() and not line.strip().startswith("#")
-        ]
-
-        self.assertNotIn("log10", source)
-        self.assertLess(len(body), 25)
+        self.assertEqual(result, 0.42)
+        get_algorithm_mock.assert_called_once_with("distance")
+        algorithm.score_pair.assert_called_once()
 
 
 class DispatchReachesThePersistedRankingTests(TestCase):
-    """
-    The Phase 2 deliverable, checked where it actually matters.
-
-    Resolving an algorithm is only useful if the choice survives all the way to
-    the stored FullAnalysisMatch rows. These select a method, run the real
-    ranking path, and read the scores back out of the database.
-    """
+    """Check that algorithm choices reach stored match rows."""
 
     def setUp(self):
         self.view = FullAnalysisListCreateView()
@@ -237,10 +214,7 @@ class DispatchReachesThePersistedRankingTests(TestCase):
         ).similarity_score
 
     def test_each_method_produces_its_own_score_in_the_database(self):
-        """
-        The reference is deliberately the 'swapped' one, because that is where
-        the four methods disagree most. Identical scores would prove nothing.
-        """
+        """Use the swapped reference because the methods score it differently."""
         for method, by_preprocessing in EXPECTED_SCORES.items():
             with self.subTest(method=method):
                 self.assertAlmostEqual(
@@ -258,7 +232,6 @@ class DispatchReachesThePersistedRankingTests(TestCase):
 
     @override_settings(SRS_DEFAULT_ALGORITHM="association")
     def test_the_configured_default_is_what_runs_when_none_is_named(self):
-        """Changing one setting changes which algorithm the API actually uses."""
         self.assertAlmostEqual(
             self.score_via_ranking_path(None),
             EXPECTED_SCORES["association"]["no_preprocessing"]["swapped"],
@@ -267,7 +240,7 @@ class DispatchReachesThePersistedRankingTests(TestCase):
 
 
 class EnvelopeContractTests(SimpleTestCase):
-    """Rules from the v1.0 envelope specification, applied to every algorithm."""
+    """Apply the result-format rules to every registered algorithm."""
 
     def envelope_for(self, algorithm_id):
         return get_algorithm(algorithm_id).compare(
@@ -282,7 +255,6 @@ class EnvelopeContractTests(SimpleTestCase):
                 self.assertEqual(validate_envelope(self.envelope_for(algorithm_id)), [])
 
     def test_similarity_is_present_as_a_float_within_range(self):
-        """Contract rule 1, the rule that makes algorithms comparable at all."""
         for algorithm_id in ALGORITHMS:
             envelope = self.envelope_for(algorithm_id)
             self.assertTrue(envelope["matches"], f"{algorithm_id} ranked nothing")
@@ -295,11 +267,7 @@ class EnvelopeContractTests(SimpleTestCase):
                     self.assertLessEqual(similarity, 1.0)
 
     def test_association_integer_score_is_coerced_at_the_envelope_boundary(self):
-        """
-        The quirk the characterisation suite recorded, handled where it should
-        be. The algorithm keeps its original arithmetic; the envelope makes it
-        a float.
-        """
+        """Ensure an exact association match is serialised as a float."""
         envelope = self.envelope_for("association")
         top_match = envelope["matches"][0]
 
@@ -319,7 +287,6 @@ class EnvelopeContractTests(SimpleTestCase):
                 self.assertEqual(similarities, sorted(similarities, reverse=True))
 
     def test_the_run_block_carries_enough_to_reproduce_the_run(self):
-        """Contract rule 4."""
         envelope = get_algorithm("correlation").compare(
             SAMPLES,
             REFERENCES,
@@ -379,7 +346,6 @@ class EnvelopeContractTests(SimpleTestCase):
         self.assertEqual(envelope["matches"], [])
 
     def test_optional_blocks_are_omitted_rather_than_sent_as_null(self):
-        """Contract rule 2 — consumers test for presence, not for emptiness."""
         envelope = self.envelope_for("log_difference_similarity")
 
         self.assertNotIn("projection", envelope)
@@ -387,12 +353,7 @@ class EnvelopeContractTests(SimpleTestCase):
 
 
 class EnvelopeValidatorTests(SimpleTestCase):
-    """
-    The validator has to actually reject things.
-
-    A contract checker that passes everything is worse than none, because it
-    creates confidence that nothing has been verified.
-    """
+    """Check both valid and invalid result envelopes."""
 
     def valid_result(self, **overrides):
         defaults = {
@@ -451,7 +412,6 @@ class EnvelopeValidatorTests(SimpleTestCase):
         self.assertIn("imputed", validate_envelope(envelope)[0])
 
     def test_raw_metrics_travel_beside_the_normalised_score(self):
-        """Contract rule 1 — algorithm-native metrics keep their own names."""
         envelope = self.valid_result(
             matches=[Match(
                 rank=1,
@@ -467,7 +427,6 @@ class EnvelopeValidatorTests(SimpleTestCase):
         )
 
     def test_signed_evidence_serialises_in_the_shared_shape(self):
-        """Contract rule 3 — one shape whether it came from a distance or SHAP."""
         envelope = self.valid_result(
             matches=[Match(
                 rank=1,

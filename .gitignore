@@ -219,3 +219,9 @@ __marimo__/
 
 # Training data
 training_data/
+
+# Microsoft Office temporary files
+~$*.xlsx
+
+# Django-generated static files
+staticfiles/

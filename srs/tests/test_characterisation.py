@@ -1,19 +1,4 @@
-"""
-Characterisation tests: the regression net for the pluggable-algorithm work.
-
-These pin the behaviour of the similarity scoring and ranking as it exists
-before any algorithm is extracted out of the view. Every later refactor must
-keep them passing unchanged; a failure means observable behaviour moved, not
-that the test needs updating.
-
-Scores are compared to twelve decimal places. That is tight enough to catch any
-change to the arithmetic while tolerating the last-bit reassociation that comes
-from summing the same terms in a different order.
-
-The scoring functions are exercised directly rather than through the HTTP
-endpoint, because a POST returns 202 and finishes the work on a background
-thread. Calling through the endpoint would race the assertions.
-"""
+"""Regression tests for similarity scores, ranking and measurement filters."""
 
 from django.test import SimpleTestCase, TestCase
 
@@ -27,9 +12,7 @@ from ..models import (
     ReferenceSampleMeasurement,
 )
 
-# One tested sample and three references chosen so the expected scores can be
-# derived by hand: an exact match, a single element moved one decade, and two
-# elements swapped across a decade in opposite directions.
+# These small fixtures keep the expected scores easy to calculate by hand.
 INPUT_VALUES = {"Cu": 100.0, "Zn": 10.0, "Au": 1.0}
 REFERENCE_VALUES = {
     "identical": {"Cu": 100.0, "Zn": 10.0, "Au": 1.0},
@@ -42,18 +25,7 @@ NO_PREPROCESSING = {}
 LOG_TRANSFORM = {"log_transform": True}
 NORMALISE = {"normalise": True}
 
-# method -> preprocessing -> reference -> score.
-#
-# log_difference_similarity scores 1 for an identical element and 0.5 for a
-# tenfold difference, so cu_x10 is (0.5 + 1 + 1) / 3 and swapped is
-# (0.5 + 0.5 + 1) / 3. Under CLR the vectors are centred on their geometric
-# mean first, which is why normalise gives a different answer.
-#
-# distance applies the same 1 / (1 + |difference|) curve to whatever the
-# preprocessing stage produced, so without preprocessing it runs on raw ppm and
-# a 900 ppm gap collapses almost to zero. With log_transform it coincides
-# exactly with log_difference_similarity, which is the relationship the
-# Aitchison work in a later phase builds on.
+# Expected score by method, preprocessing option and reference fixture.
 EXPECTED_SCORES = {
     "log_difference_similarity": {
         "no_preprocessing": {
@@ -133,12 +105,10 @@ PREPROCESSING_STATES = {
 
 
 class SimilarityScoreCharacterisationTests(SimpleTestCase):
-    """Pin the scoring arithmetic for every method and preprocessing state."""
+    """Keep score calculations stable across preprocessing options."""
 
     def setUp(self):
-        # Instantiating the view without a request is deliberate. The scoring
-        # code must stay callable from a management command or worker, so it
-        # may never reach for self.request.
+        # Scoring is also used by background workers without an HTTP request.
         self.view = FullAnalysisListCreateView()
 
     def score(self, reference_key, method, preprocessing):
@@ -170,7 +140,6 @@ class SimilarityScoreCharacterisationTests(SimpleTestCase):
                         )
 
     def test_unknown_method_falls_back_to_log_difference(self):
-        """An unrecognised method must not error or score zero."""
         for state_name, preprocessing in PREPROCESSING_STATES.items():
             for reference_key in REFERENCE_VALUES:
                 with self.subTest(preprocessing=state_name, reference=reference_key):
@@ -200,7 +169,6 @@ class SimilarityScoreCharacterisationTests(SimpleTestCase):
         )
 
     def test_every_score_is_within_the_zero_to_one_range(self):
-        """Envelope rule 1 already holds for the existing methods."""
         for method, by_preprocessing in EXPECTED_SCORES.items():
             for state_name, preprocessing in PREPROCESSING_STATES.items():
                 for reference_key in REFERENCE_VALUES:
@@ -214,11 +182,7 @@ class SimilarityScoreCharacterisationTests(SimpleTestCase):
                         self.assertLessEqual(score, 1.0)
 
     def test_association_returns_an_integer_for_an_exact_match(self):
-        """
-        Known quirk. min/max over integer bounds hands back int 1 rather than
-        1.0 for a perfect match. The envelope requires a float, so whichever
-        adapter wraps this method has to coerce the result.
-        """
+        """Record the legacy integer returned before envelope serialisation."""
         score = self.score("identical", "association", NO_PREPROCESSING)
         self.assertEqual(score, 1)
         self.assertIsInstance(score, int)

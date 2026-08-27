@@ -1,14 +1,4 @@
-"""
-The v1.0 result envelope every algorithm returns.
-
-These are plain dataclasses with no Django imports, so an algorithm can be run
-and its output inspected from a management command, the benchmark harness, or a
-test without a database or a request in sight.
-
-Only the matches block is required. Evidence, per-sample results, and the
-projection are optional and are declared by an algorithm through its
-capabilities set, so a consumer renders whatever happens to be present.
-"""
+"""Serializable result objects shared by all algorithms."""
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -20,13 +10,7 @@ SCHEMA_VERSION = "1.0"
 
 @dataclass
 class Evidence:
-    """
-    One element's signed contribution to a match.
-
-    Positive supports the match, negative conflicts with it, whatever the
-    algorithm derived it from. A distance decomposition and a SHAP value land in
-    the same shape so the results page renders both identically.
-    """
+    """One element's signed contribution to a match."""
 
     element: str
     contribution: float
@@ -42,14 +26,7 @@ class Evidence:
 
 @dataclass
 class Match:
-    """
-    One ranked reference result.
-
-    Both identifiers are carried. reference_sample_id is what the database
-    stores today; the deposit fields are what the envelope specification asks
-    for. Whether matches end up sample-level, deposit-level, or both is still an
-    open decision, so nothing here forces the choice either way.
-    """
+    """One ranked reference result and its optional evidence."""
 
     rank: int
     similarity: float
@@ -57,8 +34,7 @@ class Match:
     deposit_id: str = ""
     deposit_name: str = ""
     deposit_class: str = ""
-    # Raw algorithm-native metrics: distances, correlation coefficients,
-    # probabilities. These keep their own names alongside the normalised score.
+    # Extra metrics keep their own names beside the normalised score.
     scores: dict = field(default_factory=dict)
     confidence: Optional[dict] = None
     supporting: list = field(default_factory=list)
@@ -71,8 +47,7 @@ class Match:
             "deposit_id": self.deposit_id,
             "deposit_name": self.deposit_name,
             "deposit_class": self.deposit_class,
-            # float() is not decoration. Some legacy methods return an integer
-            # for an exact match, and the contract requires a float here.
+            # Exact matches from some methods are integers; the API uses floats.
             "scores": {"similarity": float(self.similarity), **self.scores},
         }
 
@@ -90,13 +65,7 @@ class Match:
 
 @dataclass
 class RunResult:
-    """
-    Everything one algorithm run produced, plus enough provenance to repeat it.
-
-    The algorithm identity and version, the preprocessing version and element
-    suite, and the reference library version all travel with the result so a
-    stored run can be reproduced later without guessing what produced it.
-    """
+    """Results and settings recorded for one algorithm run."""
 
     algorithm_id: str
     algorithm_version: str
@@ -134,8 +103,7 @@ class RunResult:
             "warnings": list(self.warnings),
         }
 
-        # Optional blocks are omitted rather than sent as null, so a consumer
-        # can test for presence instead of for emptiness.
+        # Leave unsupported result sections out instead of returning null.
         if self.sample_results is not None:
             envelope["sample_results"] = self.sample_results
 
@@ -146,14 +114,7 @@ class RunResult:
 
 
 def validate_envelope(envelope):
-    """
-    Return a list of contract violations; an empty list means the envelope is
-    valid.
-
-    This exists so anyone contributing a new algorithm can check their output
-    against the contract without reading the specification, and so the test
-    suite enforces the same rules for every algorithm rather than one at a time.
-    """
+    """Return result-envelope validation errors, or an empty list when valid."""
     problems = []
 
     if envelope.get("schema_version") != SCHEMA_VERSION:
