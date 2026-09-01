@@ -40,7 +40,7 @@ def _parse_float(value, label="Value"):
 
     if not isfinite(parsed):
         raise ValueError(
-            f"{label} must be a finite numeric value."
+            f"Non-finite numeric value is not supported for {label}: {value!r}."
         )
 
     return parsed
