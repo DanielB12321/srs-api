@@ -155,6 +155,18 @@ class DatasetUploadSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["uploaded_by_id", "uploaded_by_email"]
 
+    def validate_uploaded_file(self, file):
+        if not file.name.lower().endswith(".csv"):
+            raise serializers.ValidationError(
+                "Only CSV files are supported."
+            )
+
+        if file.size == 0:
+            raise serializers.ValidationError(
+                "The uploaded CSV file is empty."
+            )
+
+        return file
 
 class SampleSerializer(serializers.ModelSerializer):
     class Meta:
