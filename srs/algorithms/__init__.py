@@ -9,7 +9,7 @@ from .knn_aitchison import KnnAitchisonSimilarity
 from .log_difference import LogDifferenceSimilarity
 
 # Used when no valid default is configured.
-FALLBACK_ALGORITHM_ID = "log_difference_similarity"
+FALLBACK_ALGORITHM_ID = "knn_aitchison"
 
 ALGORITHMS = {
     algorithm.id: algorithm
