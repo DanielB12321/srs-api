@@ -169,6 +169,32 @@ class ReferenceImportViewSet(viewsets.ModelViewSet):
             status=status.HTTP_202_ACCEPTED,
         )
 
+def _delete_failed_dataset(dataset):
+    """Remove a failed initial dataset upload from the database and file storage."""
+
+    stored_file = dataset.uploaded_file
+
+    with transaction.atomic():
+        # Explicitly remove any partially imported data.
+        SampleMeasurement.objects.filter(
+            sample__dataset=dataset
+        ).delete()
+
+        Sample.objects.filter(
+            dataset=dataset
+        ).delete()
+
+        dataset.delete()
+
+    # Also remove the uploaded CSV from file storage.
+    if stored_file:
+        try:
+            stored_file.delete(save=False)
+        except Exception:
+            logger.exception(
+                "Dataset records were removed, but uploaded file cleanup failed."
+            )
+
 
 class DatasetViewSet(viewsets.ModelViewSet):
     """Upload, inspect, rerun or remove an analysed CSV dataset."""
@@ -215,12 +241,42 @@ class DatasetViewSet(viewsets.ModelViewSet):
 
         try:
             run_dataset_import(dataset.id)
-        except Exception:
-            logger.exception("Dataset import failed for dataset %s", dataset.id)
-            dataset.refresh_from_db()
+
+        except ValueError as exc:
+            # Invalid CSV/data supplied by the user.
+            logger.warning(
+                "Dataset validation failed for dataset %s: %s",
+                dataset.id,
+                exc,
+            )
+
+            _delete_failed_dataset(dataset)
+
             return Response(
-                DatasetSerializer(dataset).data,
+                {
+                    "error": "Dataset validation failed.",
+                    "details": str(exc),
+                },
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        except Exception:
+            # Unexpected server/database/programming error.
+            logger.exception(
+                "Unexpected dataset import failure for dataset %s",
+                dataset.id,
+            )
+
+            _delete_failed_dataset(dataset)
+
+            return Response(
+                {
+                    "error": (
+                        "The dataset could not be uploaded because "
+                        "an unexpected server error occurred."
+                    )
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
         dataset.refresh_from_db()
@@ -236,17 +292,26 @@ class DatasetViewSet(viewsets.ModelViewSet):
 
         try:
             run_dataset_import(dataset.id)
+
         except Exception:
-            logger.exception("Dataset rerun failed for dataset %s", dataset.id)
+            logger.exception(
+                "Dataset rerun failed for dataset %s",
+                dataset.id,
+            )
+
             dataset.refresh_from_db()
+
             return Response(
                 DatasetSerializer(dataset).data,
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         dataset.refresh_from_db()
-        return Response(DatasetSerializer(dataset).data)
-    
+
+        return Response(
+            DatasetSerializer(dataset).data
+        )
+
     @action(detail=True, methods=["get"], url_path="data")
     def data(self, request, pk=None):
         dataset = self.get_object()
@@ -254,10 +319,13 @@ class DatasetViewSet(viewsets.ModelViewSet):
         try:
             page = int(request.query_params.get("page", 1))
             page_size = int(request.query_params.get("page_size", 50))
+
         except ValueError:
             return Response(
-                {"error": "page and page_size must be integers."},
-                status=400,
+                {
+                    "error": "page and page_size must be integers."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         page = max(page, 1)
@@ -271,25 +339,42 @@ class DatasetViewSet(viewsets.ModelViewSet):
         )
 
         total_rows = samples_qs.count()
-        total_pages = max(1, ceil(total_rows / page_size))
+        total_pages = max(
+            1,
+            ceil(total_rows / page_size),
+        )
 
         start = (page - 1) * page_size
         end = start + page_size
-        page_samples = list(samples_qs[start:end])
+
+        page_samples = list(
+            samples_qs[start:end]
+        )
 
         measurement_fields = (
             SampleMeasurement.objects
             .filter(sample__dataset=dataset)
-            .values_list("element__symbol", "unit")
-            .order_by("element__symbol", "unit")
+            .values_list(
+                "element__symbol",
+                "unit",
+            )
+            .order_by(
+                "element__symbol",
+                "unit",
+            )
             .distinct()
         )
+
         measurement_columns = [
             f"{symbol}_{unit}" if unit else symbol
             for symbol, unit in measurement_fields
         ]
 
-        columns = ["sample_id", "latitude", "longitude"] + measurement_columns
+        columns = [
+            "sample_id",
+            "latitude",
+            "longitude",
+        ] + measurement_columns
 
         rows = []
 
@@ -306,9 +391,15 @@ class DatasetViewSet(viewsets.ModelViewSet):
                 row[column] = None
 
             for measurement in sample.measurements.all():
-                column_name = self._measurement_column_name(measurement)
+                column_name = self._measurement_column_name(
+                    measurement
+                )
+
                 row[column_name] = measurement.value
-                row["_measurement_ids"][column_name] = measurement.id
+
+                row["_measurement_ids"][
+                    column_name
+                ] = measurement.id
 
             rows.append(row)
 
@@ -318,7 +409,10 @@ class DatasetViewSet(viewsets.ModelViewSet):
             null_counts[column] = sum(
                 1
                 for row in rows
-                if row.get(column) is None or row.get(column) == ""
+                if (
+                    row.get(column) is None
+                    or row.get(column) == ""
+                )
             )
 
         return Response(
@@ -342,7 +436,6 @@ class DatasetViewSet(viewsets.ModelViewSet):
             return f"{symbol}_{measurement.unit}"
 
         return symbol
-
 
 # Reference-library search filters shown in the generated API documentation.
 @extend_schema(

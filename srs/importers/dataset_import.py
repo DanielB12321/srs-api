@@ -21,8 +21,8 @@ def _normalise_lookup_name(name):
     return str(name).lstrip("\ufeff").strip().lower().replace(" ", "_")
 
 
-def _parse_float(value):
-    """Parse a finite number, returning ``None`` for blanks or invalid text."""
+def _parse_float(value, label="Value"):
+    """Parse a finite number, returning None for blanks and rejecting invalid text."""
     if value is None:
         return None
 
@@ -33,11 +33,15 @@ def _parse_float(value):
 
     try:
         parsed = float(value)
-    except ValueError:
-        return None
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"{label} must be numeric or blank. Invalid value: {value!r}."
+        ) from exc
 
     if not isfinite(parsed):
-        raise ValueError(f"Non-finite numeric value is not supported: {value!r}")
+        raise ValueError(
+            f"{label} must be a finite numeric value."
+        )
 
     return parsed
 
@@ -46,11 +50,14 @@ def _parse_coordinate(value, label, minimum, maximum):
     """Parse an optional latitude or longitude and check its range."""
     if value is None or str(value).strip() == "":
         return None
-    parsed = _parse_float(value)
-    if parsed is None:
-        raise ValueError(f"{label} must be a number.")
+
+    parsed = _parse_float(value, label)
+
     if not minimum <= parsed <= maximum:
-        raise ValueError(f"{label} must be between {minimum} and {maximum}.")
+        raise ValueError(
+            f"{label} must be between {minimum} and {maximum}."
+        )
+
     return parsed
 
 
@@ -71,39 +78,73 @@ def _read_csv(dataset):
     """Return the headings and rows from a dataset's stored CSV file."""
     if not dataset.uploaded_file:
         raise ValueError("No uploaded file found for this dataset.")
+
     if not dataset.uploaded_file.name.lower().endswith(".csv"):
-        raise ValueError("Only CSV dataset uploads are currently supported.")
+        raise ValueError(
+            "Only CSV dataset uploads are currently supported."
+        )
 
     with dataset.uploaded_file.open("rb") as file:
         try:
             contents = file.read().decode("utf-8-sig")
         except UnicodeDecodeError as exc:
-            raise ValueError("CSV files must use UTF-8 text encoding.") from exc
+            raise ValueError(
+                "CSV files must use UTF-8 text encoding."
+            ) from exc
 
-    reader = csv.DictReader(StringIO(contents))
-    fieldnames = reader.fieldnames or []
-    if not fieldnames:
-        raise ValueError("CSV file has no header row.")
-    return fieldnames, list(reader)
+    try:
+        reader = csv.DictReader(StringIO(contents))
+        fieldnames = reader.fieldnames or []
+
+        if not fieldnames:
+            raise ValueError(
+                "CSV file has no header row."
+            )
+
+        rows = list(reader)
+
+    except csv.Error as exc:
+        raise ValueError(
+            "The CSV file could not be read. Please check its formatting."
+        ) from exc
+
+    if not rows:
+        raise ValueError(
+            "CSV must contain at least one sample row."
+        )
+
+    for row_number, row in enumerate(rows, start=2):
+        if None in row:
+            raise ValueError(
+                f"Row {row_number} contains more values than the CSV header."
+            )
+
+    return fieldnames, rows
 
 
 def _find_columns(fieldnames):
     """Find sample fields and return every remaining measurement heading."""
     if len(set(fieldnames)) != len(fieldnames):
-        raise ValueError("CSV headings must be unique.")
+        raise ValueError(
+            "CSV headings must be unique."
+        )
 
     normalised_fields = {}
+
     for field in fieldnames:
         key = _normalise_lookup_name(field)
+
         if key in normalised_fields:
             raise ValueError(
                 f"CSV headings become duplicates after normalising: {field!r}."
             )
+
         normalised_fields[key] = field
 
     sample_id_col = None
     latitude_col = None
     longitude_col = None
+
     for key, original in normalised_fields.items():
         if key in SAMPLE_ID_COLUMNS:
             sample_id_col = original
@@ -118,33 +159,56 @@ def _find_columns(fieldnames):
             "sample, or sample_code."
         )
 
-    ignored = {sample_id_col, latitude_col, longitude_col}
+    ignored = {
+        sample_id_col,
+        latitude_col,
+        longitude_col,
+    }
+
     measurement_columns = [
-        field for field in fieldnames
+        field
+        for field in fieldnames
         if field not in ignored
     ]
+
     if not measurement_columns:
         raise ValueError(
             "CSV must contain at least one geochemical measurement column."
         )
 
-    return sample_id_col, latitude_col, longitude_col, measurement_columns
+    return (
+        sample_id_col,
+        latitude_col,
+        longitude_col,
+        measurement_columns,
+    )
 
 
 def _validate_sample_codes(rows, sample_id_col):
     """Reject missing or repeated sample IDs before changing stored rows."""
     seen = set()
     duplicates = set()
+
     for row in rows:
-        sample_code = str(row.get(sample_id_col, "")).strip()
+        sample_code = str(
+            row.get(sample_id_col, "")
+        ).strip()
+
         if not sample_code:
-            raise ValueError("One or more rows are missing a sample ID.")
+            raise ValueError(
+                "One or more rows are missing a sample ID."
+            )
+
         if sample_code in seen:
             duplicates.add(sample_code)
+
         seen.add(sample_code)
 
     if duplicates:
-        duplicate_list = ", ".join(sorted(duplicates)[:10])
+        duplicate_list = ", ".join(
+            sorted(duplicates)[:10]
+        )
+
         raise ValueError(
             f"Duplicate sample IDs found within this file: {duplicate_list}"
         )
@@ -154,22 +218,37 @@ def _resolve_measurement_columns(measurement_columns):
     """Resolve one Element row for each measurement heading."""
     column_details = []
     element_cache = {}
+
     for column in measurement_columns:
         symbol, unit = _split_element_and_unit(column)
+
         if not symbol:
-            raise ValueError(f"Measurement heading has no element: {column!r}.")
+            raise ValueError(
+                f"Measurement heading has no element: {column!r}."
+            )
+
         if symbol in element_cache:
             raise ValueError(
                 f"Only one measurement column is allowed for element {symbol}."
             )
+
         element = element_cache.get(symbol)
+
         if element is None:
             element, _ = Element.objects.get_or_create(
                 symbol=symbol,
-                defaults={"name": symbol, "default_unit": unit},
+                defaults={
+                    "name": symbol,
+                    "default_unit": unit,
+                },
             )
+
             element_cache[symbol] = element
-        column_details.append((column, element, unit))
+
+        column_details.append(
+            (column, element, unit)
+        )
+
     return column_details
 
 
@@ -177,10 +256,12 @@ def _flush_measurements(pending_measurements):
     """Save one batch of measurements and clear the reused list."""
     if not pending_measurements:
         return
+
     SampleMeasurement.objects.bulk_create(
         pending_measurements,
         batch_size=MEASUREMENT_BATCH_SIZE,
     )
+
     pending_measurements.clear()
 
 
@@ -193,14 +274,22 @@ def _replace_samples(
     column_details,
 ):
     """Replace saved samples and return the number of missing measurements."""
-    Sample.objects.filter(dataset=dataset).delete()
+    Sample.objects.filter(
+        dataset=dataset
+    ).delete()
+
     pending_measurements = []
     null_count = 0
 
-    for row in rows:
+    for row_number, row in enumerate(rows, start=2):
+
+        sample_code = str(
+            row.get(sample_id_col, "")
+        ).strip()
+
         sample = Sample.objects.create(
             dataset=dataset,
-            sample_code=str(row.get(sample_id_col, "")).strip(),
+            sample_code=sample_code,
             latitude=(
                 _parse_coordinate(
                     row.get(latitude_col),
@@ -221,11 +310,21 @@ def _replace_samples(
                 if longitude_col
                 else None
             ),
-            metadata={"source_row": row},
+            metadata={
+                "source_row": row
+            },
         )
 
         for column, element, unit in column_details:
-            value = _parse_float(row.get(column))
+
+            value = _parse_float(
+                row.get(column),
+                label=(
+                    f"{column} for sample "
+                    f"{sample_code} on row {row_number}"
+                ),
+            )
+
             if value is None:
                 null_count += 1
 
@@ -237,10 +336,19 @@ def _replace_samples(
                     unit=unit,
                 )
             )
-            if len(pending_measurements) >= MEASUREMENT_BATCH_SIZE:
-                _flush_measurements(pending_measurements)
 
-    _flush_measurements(pending_measurements)
+            if (
+                len(pending_measurements)
+                >= MEASUREMENT_BATCH_SIZE
+            ):
+                _flush_measurements(
+                    pending_measurements
+                )
+
+    _flush_measurements(
+        pending_measurements
+    )
+
     return null_count
 
 
@@ -261,14 +369,19 @@ def _mark_completed(
     dataset.status = Dataset.STATUS_COMPLETED
     dataset.completed_at = timezone.now()
     dataset.errors = []
+
     dataset.stats = {
         "sample_id_column": sample_id_col,
         "latitude_column": latitude_col,
         "longitude_column": longitude_col,
         "measurement_columns": measurement_columns,
         "rows_imported": len(rows),
-        "measurements_imported": len(rows) * len(measurement_columns),
+        "measurements_imported": (
+            len(rows)
+            * len(measurement_columns)
+        ),
     }
+
     dataset.save(
         update_fields=[
             "row_count",
@@ -285,22 +398,55 @@ def _mark_completed(
 def run_dataset_import(dataset_id):
     """Replace a dataset's samples with rows from its stored CSV file."""
     close_old_connections()
+
     try:
-        dataset = Dataset.objects.get(id=dataset_id)
+        dataset = Dataset.objects.get(
+            id=dataset_id
+        )
+
         dataset.status = Dataset.STATUS_RUNNING
         dataset.errors = []
         dataset.stats = {}
         dataset.completed_at = None
-        dataset.save(update_fields=["status", "errors", "stats", "completed_at"])
+
+        dataset.save(
+            update_fields=[
+                "status",
+                "errors",
+                "stats",
+                "completed_at",
+            ]
+        )
 
         try:
-            fieldnames, rows = _read_csv(dataset)
-            columns = _find_columns(fieldnames)
-            sample_id_col, latitude_col, longitude_col, measurement_columns = columns
-            _validate_sample_codes(rows, sample_id_col)
+            fieldnames, rows = _read_csv(
+                dataset
+            )
+
+            columns = _find_columns(
+                fieldnames
+            )
+
+            (
+                sample_id_col,
+                latitude_col,
+                longitude_col,
+                measurement_columns,
+            ) = columns
+
+            _validate_sample_codes(
+                rows,
+                sample_id_col,
+            )
 
             with transaction.atomic():
-                column_details = _resolve_measurement_columns(measurement_columns)
+
+                column_details = (
+                    _resolve_measurement_columns(
+                        measurement_columns
+                    )
+                )
+
                 null_count = _replace_samples(
                     dataset,
                     rows,
@@ -310,21 +456,40 @@ def run_dataset_import(dataset_id):
                     column_details,
                 )
 
-            _mark_completed(
-                dataset,
-                fieldnames,
-                rows,
-                sample_id_col,
-                latitude_col,
-                longitude_col,
-                measurement_columns,
-                null_count,
-            )
+                _mark_completed(
+                    dataset,
+                    fieldnames,
+                    rows,
+                    sample_id_col,
+                    latitude_col,
+                    longitude_col,
+                    measurement_columns,
+                    null_count,
+                )
+
         except Exception as exc:
-            dataset.status = Dataset.STATUS_FAILED
-            dataset.errors = [str(exc)]
-            dataset.completed_at = timezone.now()
-            dataset.save(update_fields=["status", "errors", "completed_at"])
+
+            dataset.status = (
+                Dataset.STATUS_FAILED
+            )
+
+            dataset.errors = [
+                str(exc)
+            ]
+
+            dataset.completed_at = (
+                timezone.now()
+            )
+
+            dataset.save(
+                update_fields=[
+                    "status",
+                    "errors",
+                    "completed_at",
+                ]
+            )
+
             raise
+
     finally:
         close_old_connections()
