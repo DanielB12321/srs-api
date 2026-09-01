@@ -178,10 +178,13 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Which similarity algorithm runs when a request does not name one. Must match
 # an id registered in srs/algorithms/__init__.py; an unrecognised value falls
-# back to log_difference_similarity rather than stopping the service.
+# back to the registry's FALLBACK_ALGORITHM_ID rather than stopping the
+# service. knn_aitchison per the 2026-08/09 benchmarks: best or tied-best
+# under every preprocessing configuration, immune to preprocessing mistakes,
+# and the only algorithm with per-element evidence output.
 SRS_DEFAULT_ALGORITHM = os.environ.get(
     "SRS_DEFAULT_ALGORITHM",
-    "log_difference_similarity",
+    "knn_aitchison",
 )
 
 # Secret used only for server-to-server calls from the SRS website. There is

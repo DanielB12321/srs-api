@@ -120,7 +120,7 @@ class RunProvenanceTests(PersistenceTestCase):
     def test_an_unknown_method_records_what_actually_ran(self):
         full_analysis = self.run_analysis("not_a_real_method")
 
-        self.assertEqual(full_analysis.algorithm_id, "log_difference_similarity")
+        self.assertEqual(full_analysis.algorithm_id, "knn_aitchison")
 
     def test_provenance_columns_are_queryable(self):
         self.run_analysis("knn_aitchison")

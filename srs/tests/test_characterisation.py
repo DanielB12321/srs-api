@@ -63,6 +63,26 @@ EXPECTED_SCORES = {
             "swapped": 0.75,
         },
     },
+    # Identical rows across all three states are the point: knn_aitchison does
+    # its own compositional handling, so the preprocessing toggles cannot move
+    # its scores. That independence is why it makes a safe default.
+    "knn_aitchison": {
+        "no_preprocessing": {
+            "identical": 1.0,
+            "cu_x10": 0.5505102572168219,
+            "swapped": 0.4142135623730951,
+        },
+        "log_transform": {
+            "identical": 1.0,
+            "cu_x10": 0.5505102572168219,
+            "swapped": 0.4142135623730951,
+        },
+        "normalise": {
+            "identical": 1.0,
+            "cu_x10": 0.5505102572168219,
+            "swapped": 0.4142135623730951,
+        },
+    },
 }
 
 # Association and distance were unregistered after the 2026-08/09 benchmarks
@@ -149,13 +169,15 @@ class SimilarityScoreCharacterisationTests(SimpleTestCase):
                             places=12,
                         )
 
-    def test_unknown_method_falls_back_to_log_difference(self):
+    def test_unknown_method_falls_back_to_the_default(self):
+        # The deployment default is knn_aitchison (srs_api/settings.py), so an
+        # unknown method must produce knn scores, not a crash.
         for state_name, preprocessing in PREPROCESSING_STATES.items():
             for reference_key in REFERENCE_VALUES:
                 with self.subTest(preprocessing=state_name, reference=reference_key):
                     self.assertAlmostEqual(
                         self.score(reference_key, "not_a_real_method", preprocessing),
-                        EXPECTED_SCORES["log_difference_similarity"][state_name][
+                        EXPECTED_SCORES["knn_aitchison"][state_name][
                             reference_key
                         ],
                         places=12,
@@ -173,7 +195,7 @@ class SimilarityScoreCharacterisationTests(SimpleTestCase):
                     ):
                         self.assertAlmostEqual(
                             self.score(reference_key, legacy, preprocessing),
-                            EXPECTED_SCORES["log_difference_similarity"][
+                            EXPECTED_SCORES["knn_aitchison"][
                                 state_name
                             ][reference_key],
                             places=12,
@@ -205,13 +227,14 @@ class SimilarityScoreCharacterisationTests(SimpleTestCase):
                         )
 
     def test_missing_method_and_preprocessing_arguments_are_optional(self):
+        # No method named means the default (knn_aitchison) runs.
         self.assertAlmostEqual(
             self.view.calculate_similarity_score(
                 INPUT_VALUES,
                 REFERENCE_VALUES["cu_x10"],
                 COMMON_ELEMENTS,
             ),
-            0.8333333333333334,
+            0.5505102572168219,
             places=12,
         )
 

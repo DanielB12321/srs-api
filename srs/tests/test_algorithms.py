@@ -89,12 +89,12 @@ class RegistryTests(SimpleTestCase):
             with self.subTest(requested=requested):
                 self.assertEqual(get_algorithm(requested).id, default_algorithm_id())
 
-    @override_settings(SRS_DEFAULT_ALGORITHM="knn_aitchison")
+    @override_settings(SRS_DEFAULT_ALGORITHM="correlation")
     def test_the_default_is_configurable_without_touching_algorithm_code(self):
-        self.assertEqual(default_algorithm_id(), "knn_aitchison")
-        self.assertEqual(get_algorithm(None).id, "knn_aitchison")
+        self.assertEqual(default_algorithm_id(), "correlation")
+        self.assertEqual(get_algorithm(None).id, "correlation")
         # An explicit request still wins over the deployment default.
-        self.assertEqual(get_algorithm("correlation").id, "correlation")
+        self.assertEqual(get_algorithm("knn_aitchison").id, "knn_aitchison")
 
     @override_settings(SRS_DEFAULT_ALGORITHM="a_typo_in_the_environment")
     def test_a_misconfigured_default_does_not_break_the_service(self):
