@@ -2,14 +2,11 @@
 
 from django.conf import settings
 
-from .association import AssociationSimilarity
 from .base import PairwiseSimilarity, SimilarityAlgorithm
 from .correlation import CorrelationSimilarity
-from .distance import DistanceSimilarity
 from .envelope import Evidence, Match, RunResult, SCHEMA_VERSION, validate_envelope
 from .knn_aitchison import KnnAitchisonSimilarity
 from .log_difference import LogDifferenceSimilarity
-from .ml_ensemble import XgbSvmEnsembleSimilarity
 
 # Used when no valid default is configured.
 FALLBACK_ALGORITHM_ID = "log_difference_similarity"
@@ -19,10 +16,7 @@ ALGORITHMS = {
     for algorithm in (
         LogDifferenceSimilarity,
         CorrelationSimilarity,
-        AssociationSimilarity,
-        DistanceSimilarity,
         KnnAitchisonSimilarity,
-        XgbSvmEnsembleSimilarity,
     )
 }
 

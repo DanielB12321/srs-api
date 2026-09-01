@@ -32,10 +32,15 @@ def prepared_example():
 
 
 class MlEnsembleAdapterTests(SimpleTestCase):
-    def test_registry_loads_without_importing_optional_packages(self):
-        algorithm = get_algorithm("xgboost_rbf_svm_ensemble")
-
-        self.assertIsInstance(algorithm, XgbSvmEnsembleSimilarity)
+    def test_the_ensemble_is_no_longer_registered(self):
+        # Unregistered after the 2026-08/09 benchmarks (barely above the
+        # majority-class baseline at ~75x the cost of every rival). Requests
+        # naming it resolve to the default like any unknown id; the module
+        # itself stays importable and tested below.
+        self.assertNotIsInstance(
+            get_algorithm("xgboost_rbf_svm_ensemble"), XgbSvmEnsembleSimilarity
+        )
+        self.assertIsInstance(XgbSvmEnsembleSimilarity(), XgbSvmEnsembleSimilarity)
 
     def test_missing_numpy_has_a_clear_unavailable_error(self):
         real_import = builtins.__import__

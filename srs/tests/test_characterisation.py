@@ -2,6 +2,8 @@
 
 from django.test import SimpleTestCase, TestCase
 
+from ..algorithms.association import AssociationSimilarity
+from ..algorithms.distance import DistanceSimilarity
 from ..api_views import FullAnalysisListCreateView
 from ..models import (
     Element,
@@ -61,6 +63,14 @@ EXPECTED_SCORES = {
             "swapped": 0.75,
         },
     },
+}
+
+# Association and distance were unregistered after the 2026-08/09 benchmarks
+# (association duplicates correlation, distance duplicates log-difference in
+# any meaningful configuration). Their modules stay in the tree, so their
+# arithmetic stays pinned here through the classes directly rather than
+# through the view's registry lookup.
+UNREGISTERED_EXPECTED_SCORES = {
     "association": {
         "no_preprocessing": {
             "identical": 1,
@@ -151,6 +161,49 @@ class SimilarityScoreCharacterisationTests(SimpleTestCase):
                         places=12,
                     )
 
+    def test_unregistered_legacy_methods_fall_back_to_the_default(self):
+        """Old clients naming a removed method get the default, not an error."""
+        for legacy in ("association", "distance", "xgboost_rbf_svm_ensemble"):
+            for state_name, preprocessing in PREPROCESSING_STATES.items():
+                for reference_key in REFERENCE_VALUES:
+                    with self.subTest(
+                        method=legacy,
+                        preprocessing=state_name,
+                        reference=reference_key,
+                    ):
+                        self.assertAlmostEqual(
+                            self.score(reference_key, legacy, preprocessing),
+                            EXPECTED_SCORES["log_difference_similarity"][
+                                state_name
+                            ][reference_key],
+                            places=12,
+                        )
+
+    def test_unregistered_modules_keep_their_pinned_arithmetic(self):
+        """The removed algorithms' modules stay in the tree; pin them directly."""
+        classes = {
+            "association": AssociationSimilarity,
+            "distance": DistanceSimilarity,
+        }
+        for method, by_preprocessing in UNREGISTERED_EXPECTED_SCORES.items():
+            for state_name, expected_by_reference in by_preprocessing.items():
+                for reference_key, expected in expected_by_reference.items():
+                    with self.subTest(
+                        method=method,
+                        preprocessing=state_name,
+                        reference=reference_key,
+                    ):
+                        self.assertAlmostEqual(
+                            classes[method]().score_pair(
+                                INPUT_VALUES,
+                                REFERENCE_VALUES[reference_key],
+                                COMMON_ELEMENTS,
+                                PREPROCESSING_STATES[state_name],
+                            ),
+                            expected,
+                            places=12,
+                        )
+
     def test_missing_method_and_preprocessing_arguments_are_optional(self):
         self.assertAlmostEqual(
             self.view.calculate_similarity_score(
@@ -183,7 +236,12 @@ class SimilarityScoreCharacterisationTests(SimpleTestCase):
 
     def test_association_returns_an_integer_for_an_exact_match(self):
         """Record the legacy integer returned before envelope serialisation."""
-        score = self.score("identical", "association", NO_PREPROCESSING)
+        score = AssociationSimilarity().score_pair(
+            INPUT_VALUES,
+            REFERENCE_VALUES["identical"],
+            COMMON_ELEMENTS,
+            NO_PREPROCESSING,
+        )
         self.assertEqual(score, 1)
         self.assertIsInstance(score, int)
 

@@ -55,6 +55,21 @@ REFERENCES = [
 class RegistryTests(SimpleTestCase):
     """Check algorithm registration and default selection."""
 
+    def test_only_the_three_distinct_algorithms_are_offered(self):
+        """The 2026-08/09 benchmarks trimmed the registry to three.
+
+        Association duplicates correlation (identical under CLR, empirically
+        identical raw), distance duplicates log-difference whenever a
+        log/CLR transform makes it meaningful, and the ML ensemble scored
+        barely above the majority-class baseline at ~75x the cost. The
+        modules stay in the tree; they are just not offered. See
+        SRS_QUT/docs/SRS_ANALYSIS.md for the full evidence.
+        """
+        self.assertEqual(
+            set(ALGORITHMS),
+            {"log_difference_similarity", "correlation", "knn_aitchison"},
+        )
+
     def test_every_registered_algorithm_declares_its_identity(self):
         for algorithm_id, algorithm_class in ALGORITHMS.items():
             with self.subTest(algorithm=algorithm_id):
@@ -74,10 +89,10 @@ class RegistryTests(SimpleTestCase):
             with self.subTest(requested=requested):
                 self.assertEqual(get_algorithm(requested).id, default_algorithm_id())
 
-    @override_settings(SRS_DEFAULT_ALGORITHM="distance")
+    @override_settings(SRS_DEFAULT_ALGORITHM="knn_aitchison")
     def test_the_default_is_configurable_without_touching_algorithm_code(self):
-        self.assertEqual(default_algorithm_id(), "distance")
-        self.assertEqual(get_algorithm(None).id, "distance")
+        self.assertEqual(default_algorithm_id(), "knn_aitchison")
+        self.assertEqual(get_algorithm(None).id, "knn_aitchison")
         # An explicit request still wins over the deployment default.
         self.assertEqual(get_algorithm("correlation").id, "correlation")
 
@@ -224,17 +239,22 @@ class DispatchReachesThePersistedRankingTests(TestCase):
                 )
 
     def test_preprocessing_reaches_the_algorithm_through_the_ranking_path(self):
+        # Correlation scores the swapped reference very differently with CLR
+        # (0.75) than without (0.324...), so the right value here proves the
+        # preprocessing block travelled the whole ranking path.
         self.assertAlmostEqual(
-            self.score_via_ranking_path("distance", {"normalise": True}),
-            EXPECTED_SCORES["distance"]["normalise"]["swapped"],
+            self.score_via_ranking_path("correlation", {"normalise": True}),
+            EXPECTED_SCORES["correlation"]["normalise"]["swapped"],
             places=12,
         )
 
-    @override_settings(SRS_DEFAULT_ALGORITHM="association")
+    @override_settings(SRS_DEFAULT_ALGORITHM="correlation")
     def test_the_configured_default_is_what_runs_when_none_is_named(self):
+        # Correlation's score differs from the fallback's, so getting it back
+        # proves the configured default ran rather than log-difference.
         self.assertAlmostEqual(
             self.score_via_ranking_path(None),
-            EXPECTED_SCORES["association"]["no_preprocessing"]["swapped"],
+            EXPECTED_SCORES["correlation"]["no_preprocessing"]["swapped"],
             places=12,
         )
 

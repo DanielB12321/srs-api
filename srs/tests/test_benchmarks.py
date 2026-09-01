@@ -134,7 +134,7 @@ class HarnessTests(TestCase):
     def test_the_harness_scores_every_registered_algorithm(self):
         signatures = load_signatures()
 
-        for algorithm_id in ("log_difference_similarity", "correlation", "distance"):
+        for algorithm_id in ("log_difference_similarity", "correlation", "knn_aitchison"):
             with self.subTest(algorithm=algorithm_id):
                 result = run_benchmark(get_algorithm(algorithm_id), signatures)
 

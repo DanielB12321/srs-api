@@ -55,6 +55,15 @@ class Command(BaseCommand):
             help="Censored-data policy applied to every algorithm equally.",
         )
         parser.add_argument(
+            "--normalise",
+            action="store_true",
+            help=(
+                "Apply CLR normalisation, the configuration the application "
+                "defaults to. Without it the pattern algorithms score on raw "
+                "concentrations and look far weaker than users will see."
+            ),
+        )
+        parser.add_argument(
             "--per-class",
             action="store_true",
             help="Also print a per-class breakdown for the best algorithm.",
@@ -78,6 +87,8 @@ class Command(BaseCommand):
         protocols = options["protocol"] or [LEAVE_ONE_DEPOSIT_OUT]
         max_queries = options["max_queries"] or None
         preprocessing = {"handle_missing": options["handle_missing"]}
+        if options["normalise"]:
+            preprocessing["normalise"] = True
 
         self.stdout.write("Loading reference library...")
         signatures = load_signatures(preprocessing)
