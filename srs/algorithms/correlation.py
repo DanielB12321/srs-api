@@ -1,6 +1,11 @@
 """Pearson correlation between two element patterns."""
 
-from .base import PairwiseSimilarity, weighted_dot, weighted_mean
+from .base import (
+    PairwiseSimilarity,
+    signed_evidence,
+    weighted_dot,
+    weighted_mean,
+)
 from .log_difference import LogDifferenceSimilarity
 
 
@@ -12,8 +17,8 @@ class CorrelationSimilarity(PairwiseSimilarity):
     """
 
     id = "correlation"
-    version = "1.0.0"
-    capabilities = frozenset()
+    version = "1.1.0"
+    capabilities = frozenset({"evidence"})
 
     def score_vectors(self, prepared):
         input_vector = prepared.input_vector
@@ -36,3 +41,20 @@ class CorrelationSimilarity(PairwiseSimilarity):
         ) ** 0.5
 
         return (1 + numerator / denominator) / 2 if denominator else 0
+
+    def evidence(self, prepared):
+        """Split element covariance into alignment and disagreement evidence."""
+        if len(prepared.input_vector) < 2:
+            return LogDifferenceSimilarity().evidence(prepared)
+
+        weights = prepared.weights
+        input_mean = weighted_mean(prepared.input_vector, weights)
+        reference_mean = weighted_mean(prepared.reference_vector, weights)
+        effects = [
+            (left - input_mean) * (right - reference_mean)
+            for left, right in zip(
+                prepared.input_vector,
+                prepared.reference_vector,
+            )
+        ]
+        return signed_evidence(prepared, effects)

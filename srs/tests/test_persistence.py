@@ -172,14 +172,16 @@ class MatchDetailTests(PersistenceTestCase):
             .order_by("rank")
         )
 
-    def test_an_algorithm_with_no_extra_output_stores_nothing_extra(self):
+    def test_log_difference_stores_evidence_without_unrelated_detail(self):
         matches = self.matches(self.run_analysis("log_difference_similarity"))
 
         for match in matches:
             with self.subTest(rank=match.rank):
                 self.assertIsNone(match.scores)
                 self.assertIsNone(match.confidence)
-                self.assertIsNone(match.evidence)
+                self.assertIsNotNone(match.evidence)
+                self.assertIn("supporting", match.evidence)
+                self.assertIn("conflicting", match.evidence)
 
     def test_knn_stores_its_raw_metrics_confidence_and_evidence(self):
         matches = self.matches(self.run_analysis("knn_aitchison"))
@@ -262,7 +264,7 @@ class BackwardsCompatibilityTests(PersistenceTestCase):
             "match_count",
         }.issubset(payload["analysed_samples"][0]))
 
-    def test_a_ranked_match_is_unchanged_for_an_algorithm_adding_nothing(self):
+    def test_ranked_match_keeps_base_keys_when_evidence_is_added(self):
         full_analysis = self.run_analysis("log_difference_similarity")
 
         payload = self.client.get(
@@ -270,7 +272,8 @@ class BackwardsCompatibilityTests(PersistenceTestCase):
         ).json()
 
         for match in payload["ranked_matches"]["results"]:
-            self.assertEqual(set(match), MATCH_KEYS)
+            self.assertTrue(MATCH_KEYS.issubset(match))
+            self.assertIn("evidence", match)
 
     def test_new_blocks_appear_only_when_an_algorithm_produced_them(self):
         full_analysis = self.run_analysis("knn_aitchison", detail_top_n=1)

@@ -24,7 +24,7 @@ from ..models import (
     ReferenceSample,
     ReferenceSampleMeasurement,
 )
-from ..preprocessing import PIPELINE_VERSION
+from ..preprocessing import PIPELINE_VERSION, prepare_vectors
 from .test_characterisation import (
     COMMON_ELEMENTS,
     EXPECTED_SCORES,
@@ -122,6 +122,49 @@ class RegistryTests(SimpleTestCase):
             with self.subTest(algorithm=entry["id"]):
                 self.assertTrue(entry["description"])
                 self.assertTrue(entry["version"])
+
+
+class StandardAlgorithmEvidenceTests(SimpleTestCase):
+    """Check evidence produced by the two standard comparison methods."""
+
+    def test_log_difference_separates_close_and_distant_elements(self):
+        vectors = prepare_vectors(
+            INPUT_VALUES,
+            {"Cu": 100000.0, "Zn": 10.0, "Au": 1.0},
+            COMMON_ELEMENTS,
+        )
+
+        supporting, conflicting = get_algorithm(
+            "log_difference_similarity"
+        ).evidence(vectors)
+
+        self.assertEqual({entry.element for entry in supporting}, {"Au", "Zn"})
+        self.assertEqual([entry.element for entry in conflicting], ["Cu"])
+        self.assertAlmostEqual(
+            sum(abs(entry.contribution) for entry in supporting + conflicting),
+            1.0,
+        )
+
+    def test_correlation_separates_aligned_and_opposing_elements(self):
+        vectors = prepare_vectors(
+            INPUT_VALUES,
+            REFERENCE_VALUES["swapped"],
+            COMMON_ELEMENTS,
+        )
+
+        supporting, conflicting = get_algorithm("correlation").evidence(vectors)
+
+        self.assertTrue(supporting)
+        self.assertTrue(conflicting)
+        self.assertAlmostEqual(
+            sum(abs(entry.contribution) for entry in supporting + conflicting),
+            1.0,
+        )
+
+    def test_registered_algorithms_advertise_evidence(self):
+        for algorithm_id in ALGORITHMS:
+            with self.subTest(algorithm=algorithm_id):
+                self.assertIn("evidence", get_algorithm(algorithm_id).capabilities)
 
 
 class ViewDelegationTests(SimpleTestCase):

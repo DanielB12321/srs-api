@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from time import perf_counter
 
 from ..preprocessing import describe, prepare_vectors, resolve_options
-from .envelope import Match, RunResult
+from .envelope import Evidence, Match, RunResult
 
 
 def weighted_mean(values, weights=None):
@@ -30,6 +30,39 @@ def weighted_dot(left, right, weights=None):
         weight * left_value * right_value
         for weight, left_value, right_value in zip(weights, left, right)
     )
+
+
+def signed_evidence(prepared, raw_contributions):
+    """Scale per-element effects and split them by whether they help the match."""
+    weights = prepared.weights or [1.0] * len(raw_contributions)
+    weighted = [
+        weight * contribution
+        for weight, contribution in zip(weights, raw_contributions)
+    ]
+    total = sum(abs(contribution) for contribution in weighted)
+
+    if not total:
+        return [], []
+
+    supporting = []
+    conflicting = []
+    imputed = prepared.imputed or [False] * len(prepared.symbols)
+
+    for symbol, contribution, was_imputed in zip(
+        prepared.symbols,
+        weighted,
+        imputed,
+    ):
+        scaled = contribution / total
+        entry = Evidence(symbol, scaled, bool(was_imputed))
+        if scaled >= 0:
+            supporting.append(entry)
+        else:
+            conflicting.append(entry)
+
+    supporting.sort(key=lambda entry: -entry.contribution)
+    conflicting.sort(key=lambda entry: entry.contribution)
+    return supporting, conflicting
 
 
 class SimilarityAlgorithm(ABC):
@@ -123,6 +156,32 @@ class PairwiseSimilarity(SimilarityAlgorithm):
             self._rank_one_sample(sample, reference_list, options, top_n)
             for sample in samples
         ]
+        detail_top_n = max(0, int(config.get("detail_top_n", 10)))
+        references_by_id = {
+            reference.get("id"): reference
+            for reference in reference_list
+        }
+
+        # Evidence is deliberately limited to the leading matches so a large
+        # complete ranking does not spend time building detail nobody sees.
+        for sample, ranking in zip(samples, rankings):
+            input_values = sample.get("values") or {}
+            input_imputed = set(sample.get("imputed") or ())
+            for match in ranking[:detail_top_n]:
+                reference = references_by_id.get(match.reference_sample_id)
+                reference_values = (reference or {}).get("values") or {}
+                common_elements = set(input_values) & set(reference_values)
+                if not common_elements:
+                    continue
+
+                prepared = prepare_vectors(
+                    input_values,
+                    reference_values,
+                    common_elements,
+                    options,
+                    input_imputed | set((reference or {}).get("imputed") or ()),
+                )
+                match.supporting, match.conflicting = self.evidence(prepared)
         runtime_ms = (perf_counter() - started) * 1000
 
         # Record elements present on both sides of the comparison.
