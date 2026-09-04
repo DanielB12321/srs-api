@@ -364,7 +364,7 @@ class EnvelopeContractTests(SimpleTestCase):
 
         self.assertEqual(envelope["schema_version"], SCHEMA_VERSION)
         self.assertEqual(run["algorithm"]["id"], "correlation")
-        self.assertEqual(run["algorithm"]["version"], "1.0.0")
+        self.assertEqual(run["algorithm"]["version"], "1.1.0")
         self.assertEqual(run["algorithm"]["params"]["top_n"], 3)
         # The preprocessing block records the resolved configuration and the
         # element suite that was actually compared, not the raw request.
@@ -408,11 +408,10 @@ class EnvelopeContractTests(SimpleTestCase):
 
         self.assertEqual(envelope["matches"], [])
 
-    def test_optional_blocks_are_omitted_rather_than_sent_as_null(self):
+    def test_optional_projection_is_omitted_rather_than_sent_as_null(self):
         envelope = self.envelope_for("log_difference_similarity")
 
         self.assertNotIn("projection", envelope)
-        self.assertNotIn("evidence", envelope["matches"][0])
 
 
 class EnvelopeValidatorTests(SimpleTestCase):
