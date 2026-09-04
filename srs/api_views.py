@@ -105,9 +105,9 @@ def _normalise_geographic_filter(raw_filter):
         raise ValueError(
             "The geographic filter centre is outside the valid coordinate range."
         )
-    if not 0 < radius_km <= 20000:
+    if not 0 < radius_km <= 10000:
         raise ValueError(
-            "The geographic filter radius must be between 0 and 20,000 km."
+            "The geographic filter radius must be between 0 and 10,000 km."
         )
     return {
         "enabled": True,
