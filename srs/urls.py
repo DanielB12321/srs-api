@@ -13,6 +13,7 @@ from .api_views import (
     FullAnalysisSampleResultView,
     ReferenceImportViewSet,
     ReferenceLibrarySearchView,
+    ReferenceSampleLocationListView,
     SimilarityAlgorithmListView,
 )
 from .views import (
@@ -47,6 +48,7 @@ urlpatterns = [
     # Keep this before router.urls so "bulk-details" is not interpreted as a
     # ReferenceSample primary key by the router's detail route.
     path("reference-samples/bulk-details/", BulkReferenceSampleDetailView.as_view()),
+    path("reference-samples/locations/", ReferenceSampleLocationListView.as_view()),
     path("", include(router.urls)),
     path("reference-library/search/", ReferenceLibrarySearchView.as_view()),
     path("algorithms/", SimilarityAlgorithmListView.as_view()),

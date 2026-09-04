@@ -10,7 +10,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 
 from ..api_views import FullAnalysisListCreateView
-from ..models import Dataset, FullAnalysis
+from ..models import Dataset, FullAnalysis, ReferenceDeposit, ReferenceSample
 from ..preprocessing import resolve_options
 
 
@@ -104,6 +104,74 @@ class APIViewRegressionTests(TestCase):
         self.assertEqual(analysis.parameters["detail_top_n"], 4)
         self.assertEqual(analysis.parameters["k"], 3)
         thread.return_value.start.assert_called_once_with()
+
+    @patch("srs.api_views.threading.Thread")
+    def test_analysis_preserves_the_applied_geographic_filter(self, thread):
+        deposit = ReferenceDeposit.objects.create(
+            name="Inside deposit",
+            three_char_code="INS",
+            latitude=-20.0,
+            longitude=130.0,
+        )
+        ReferenceSample.objects.create(
+            reference_deposit=deposit,
+            sample_code="INSIDE",
+        )
+        ReferenceSample.objects.create(
+            sample_code="OUTSIDE",
+            latitude=-25.0,
+            longitude=140.0,
+        )
+        ReferenceSample.objects.create(sample_code="NO-COORDINATES")
+        payload = self.sample_payload()
+        payload["geographic_filter"] = {
+            "enabled": True,
+            "center": {"latitude": -20.0, "longitude": 130.0},
+            "radius_km": 50.0,
+        }
+
+        response = self.client.post(
+            "/api/full-analysis/",
+            payload,
+            content_type="application/json",
+            **KEY_HEADER,
+        )
+
+        self.assertEqual(response.status_code, 202)
+        analysis = FullAnalysis.objects.get(id=response.json()["full_analysis_id"])
+        saved_filter = analysis.parameters["geographic_filter"]
+        self.assertEqual(saved_filter["target"], "reference_samples")
+        self.assertEqual(saved_filter["candidate_reference_count"], 3)
+        self.assertEqual(saved_filter["included_reference_count"], 1)
+        self.assertEqual(saved_filter["excluded_reference_count"], 2)
+        self.assertEqual(saved_filter["missing_coordinate_count"], 1)
+        self.assertEqual(analysis.parameters["reference_count"], 1)
+        thread.return_value.start.assert_called_once_with()
+
+    def test_reference_location_list_uses_deposit_coordinates_as_fallback(self):
+        deposit = ReferenceDeposit.objects.create(
+            name="Mapped deposit",
+            three_char_code="MAP",
+            latitude=-20.0,
+            longitude=130.0,
+        )
+        ReferenceSample.objects.create(
+            reference_deposit=deposit,
+            sample_code="FALLBACK",
+        )
+        ReferenceSample.objects.create(sample_code="NO-COORDINATES")
+
+        response = self.client.get(
+            "/api/reference-samples/locations/",
+            **KEY_HEADER,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["count"], 2)
+        self.assertEqual(response.json()["mapped_count"], 1)
+        self.assertEqual(response.json()["missing_coordinate_count"], 1)
+        self.assertEqual(response.json()["results"][0]["deposit_name"], "Mapped deposit")
+        self.assertEqual(response.json()["results"][0]["latitude"], -20.0)
 
     def test_analysis_rejects_invalid_detail_limits(self):
         payload = self.sample_payload()

@@ -4,6 +4,7 @@ import hashlib
 import heapq
 import json
 import logging
+import math
 import threading
 from math import ceil
 from time import perf_counter
@@ -73,6 +74,122 @@ def _as_json_object(value) -> dict:
             return {}
         return parsed if isinstance(parsed, dict) else {}
     return {}
+
+
+def _normalise_geographic_filter(raw_filter):
+    """Validate an optional reference-library centre and radius."""
+    if raw_filter in (None, {}):
+        return None
+    if not isinstance(raw_filter, dict):
+        raise ValueError("The geographic filter is invalid.")
+    if not raw_filter.get("enabled"):
+        return None
+
+    centre = raw_filter.get("center")
+    if not isinstance(centre, dict):
+        raise ValueError("Choose a centre point for the geographic filter.")
+    try:
+        latitude = float(centre.get("latitude"))
+        longitude = float(centre.get("longitude"))
+        radius_km = float(raw_filter.get("radius_km"))
+    except (TypeError, ValueError):
+        raise ValueError(
+            "The geographic filter coordinates and radius must be numbers."
+        )
+
+    if not all(math.isfinite(value) for value in (latitude, longitude, radius_km)):
+        raise ValueError(
+            "The geographic filter coordinates and radius must be finite numbers."
+        )
+    if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+        raise ValueError(
+            "The geographic filter centre is outside the valid coordinate range."
+        )
+    if not 0 < radius_km <= 20000:
+        raise ValueError(
+            "The geographic filter radius must be between 0 and 20,000 km."
+        )
+    return {
+        "enabled": True,
+        "target": "reference_samples",
+        "center": {"latitude": latitude, "longitude": longitude},
+        "radius_km": radius_km,
+    }
+
+
+def _reference_coordinates(reference_sample):
+    """Use sample coordinates first, then its deposit location as fallback."""
+    deposit = reference_sample.reference_deposit
+    latitude = (
+        reference_sample.latitude
+        if reference_sample.latitude is not None
+        else (deposit.latitude if deposit else None)
+    )
+    longitude = (
+        reference_sample.longitude
+        if reference_sample.longitude is not None
+        else (deposit.longitude if deposit else None)
+    )
+    try:
+        latitude = float(latitude)
+        longitude = float(longitude)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(latitude) or not math.isfinite(longitude):
+        return None
+    if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+        return None
+    return latitude, longitude
+
+
+def _distance_km(first_latitude, first_longitude, second_latitude, second_longitude):
+    """Return the great-circle distance between two coordinate pairs."""
+    latitude_1 = math.radians(first_latitude)
+    latitude_2 = math.radians(second_latitude)
+    latitude_delta = latitude_2 - latitude_1
+    longitude_delta = math.radians(second_longitude - first_longitude)
+    haversine = (
+        math.sin(latitude_delta / 2) ** 2
+        + math.cos(latitude_1)
+        * math.cos(latitude_2)
+        * math.sin(longitude_delta / 2) ** 2
+    )
+    return 6371.0088 * 2 * math.asin(min(1, math.sqrt(haversine)))
+
+
+def _reference_ids_in_geographic_filter(geographic_filter):
+    """Find reference IDs inside the saved circle and return count details."""
+    reference_ids = []
+    missing_coordinate_count = 0
+    candidates = (
+        ReferenceSample.objects
+        .select_related("reference_deposit")
+        .only(
+            "id",
+            "latitude",
+            "longitude",
+            "reference_deposit__latitude",
+            "reference_deposit__longitude",
+        )
+    )
+    candidate_count = candidates.count()
+    centre = geographic_filter["center"]
+
+    for reference_sample in candidates.iterator(chunk_size=500):
+        coordinates = _reference_coordinates(reference_sample)
+        if coordinates is None:
+            missing_coordinate_count += 1
+            continue
+        distance = _distance_km(
+            centre["latitude"],
+            centre["longitude"],
+            coordinates[0],
+            coordinates[1],
+        )
+        if distance <= geographic_filter["radius_km"]:
+            reference_ids.append(reference_sample.id)
+
+    return reference_ids, candidate_count, missing_coordinate_count
 
 
 def reference_library_version() -> str:
@@ -684,6 +801,53 @@ class BulkReferenceSampleDetailView(APIView):
         }
 
 
+class ReferenceSampleLocationListView(APIView):
+    """Return only the fields needed by the analysis-area map."""
+
+    @extend_schema(
+        operation_id="reference_sample_locations",
+        responses={200: OpenApiTypes.OBJECT},
+    )
+    def get(self, request):
+        references = (
+            ReferenceSample.objects
+            .select_related("reference_deposit")
+            .only(
+                "id",
+                "sample_code",
+                "latitude",
+                "longitude",
+                "reference_deposit__name",
+                "reference_deposit__latitude",
+                "reference_deposit__longitude",
+            )
+            .order_by("id")
+        )
+        results = []
+        missing_coordinate_count = 0
+
+        for reference_sample in references.iterator(chunk_size=500):
+            coordinates = _reference_coordinates(reference_sample)
+            if coordinates is None:
+                missing_coordinate_count += 1
+                continue
+            deposit = reference_sample.reference_deposit
+            results.append({
+                "id": reference_sample.id,
+                "sample_code": reference_sample.sample_code,
+                "deposit_name": deposit.name if deposit else None,
+                "latitude": coordinates[0],
+                "longitude": coordinates[1],
+            })
+
+        return Response({
+            "count": references.count(),
+            "mapped_count": len(results),
+            "missing_coordinate_count": missing_coordinate_count,
+            "results": results,
+        })
+
+
 class SimilarityAlgorithmListView(APIView):
     """List the similarity algorithms available to the analysis page."""
 
@@ -786,12 +950,45 @@ class FullAnalysisListCreateView(APIView):
         )
         preprocessing = request.data.get("preprocessing") or {}
 
+        try:
+            geographic_filter = _normalise_geographic_filter(
+                request.data.get("geographic_filter")
+            )
+        except ValueError as error:
+            return Response(
+                {"error": str(error)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        reference_count = ReferenceSample.objects.count()
+        if geographic_filter:
+            reference_ids, candidate_count, missing_count = (
+                _reference_ids_in_geographic_filter(geographic_filter)
+            )
+            if not reference_ids:
+                return Response(
+                    {
+                        "error": (
+                            "No reference samples with valid coordinates fall "
+                            "within the geographic filter."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            reference_count = len(reference_ids)
+            geographic_filter.update({
+                "candidate_reference_count": candidate_count,
+                "included_reference_count": reference_count,
+                "excluded_reference_count": candidate_count - reference_count,
+                "missing_coordinate_count": missing_count,
+            })
+
         requested_top_n = request.data.get("top_n", 200)
         if str(requested_top_n).strip().lower() == "all":
             # Persist the complete ranking while result retrieval remains
             # paginated. Resolve this to a number now so the background worker
             # sees a stable limit for the reference-library snapshot it runs.
-            top_n = ReferenceSample.objects.count()
+            top_n = reference_count
         else:
             try:
                 top_n = int(requested_top_n)
@@ -854,6 +1051,8 @@ class FullAnalysisListCreateView(APIView):
         # Keep the value positive, but do not impose an upper limit. Large result
         # sets are exposed through the paginated per-sample results endpoint.
         top_n = max(1, top_n)
+        if reference_count:
+            top_n = min(top_n, reference_count)
         first_sample = samples[0]
         sample_snapshot = dict(request.data)
         sample_snapshot["samples"] = samples
@@ -878,6 +1077,7 @@ class FullAnalysisListCreateView(APIView):
                 "dataset_name": request.data.get("dataset_name"),
                 "selected_elements": request.data.get("selected_elements") or [],
                 "preprocessing": preprocessing,
+                "geographic_filter": geographic_filter,
                 "similarity_method": similarity_method,
                 "requested_similarity_method": requested_similarity_method,
                 "algorithm_id": resolved_algorithm.id,
@@ -886,7 +1086,7 @@ class FullAnalysisListCreateView(APIView):
                 "samples_completed": 0,
                 "sample_count": len(samples),
                 "references_processed": 0,
-                "reference_count": ReferenceSample.objects.count(),
+                "reference_count": reference_count,
                 "note": "Background batched similarity analysis.",
             },
             status=FullAnalysis.STATUS_PENDING,
@@ -932,6 +1132,12 @@ class FullAnalysisListCreateView(APIView):
                 default_algorithm_id(),
             )
             preprocessing = parameters.get("preprocessing") or {}
+            geographic_filter = parameters.get("geographic_filter")
+            reference_ids = None
+            if geographic_filter:
+                reference_ids, _, _ = _reference_ids_in_geographic_filter(
+                    geographic_filter
+                )
             algorithm = get_algorithm(similarity_method)
 
             # Provenance is written before the work starts, so a run that fails
@@ -966,6 +1172,7 @@ class FullAnalysisListCreateView(APIView):
                     batch_size,
                     similarity_method,
                     preprocessing,
+                    reference_ids,
                 )
                 parameters["samples_completed"] = sample_index + 1
                 parameters["references_processed"] = parameters["reference_count"]
@@ -1148,6 +1355,7 @@ class FullAnalysisListCreateView(APIView):
         batch_size,
         similarity_method,
         preprocessing,
+        reference_ids=None,
     ):
         """Compare one analysed sample with the reference library."""
         # Resolved once, outside the reference loop, so policy names are not
@@ -1171,6 +1379,7 @@ class FullAnalysisListCreateView(APIView):
                 top_n,
                 batch_size,
                 options,
+                reference_ids,
             )
 
         # A symbol-to-value dictionary makes finding shared elements inexpensive.
@@ -1182,7 +1391,10 @@ class FullAnalysisListCreateView(APIView):
         # final ranking is the best top_n from the complete reference library,
         # rather than a separate partial ranking from each batch.
         best_matches = []
-        reference_count = ReferenceSample.objects.count()
+        reference_queryset = ReferenceSample.objects.all()
+        if reference_ids is not None:
+            reference_queryset = reference_queryset.filter(id__in=reference_ids)
+        reference_count = reference_queryset.count()
         FullAnalysisMatch.objects.filter(
             full_analysis=full_analysis,
             analysed_sample_index=sample_index,
@@ -1190,7 +1402,7 @@ class FullAnalysisListCreateView(APIView):
 
         for offset in range(0, reference_count, batch_size):
             reference_batch = list(
-                ReferenceSample.objects
+                reference_queryset
                 .select_related("reference_deposit")
                 .prefetch_related("measurements__element")
                 .order_by("id")[offset:offset + batch_size]
@@ -1279,6 +1491,7 @@ class FullAnalysisListCreateView(APIView):
         top_n,
         batch_size,
         options,
+        reference_ids=None,
     ):
         """Run an algorithm that compares against the whole library at once."""
         input_values, input_imputed = extract_values(measurements, options)
@@ -1289,8 +1502,11 @@ class FullAnalysisListCreateView(APIView):
         ).delete()
 
         references = []
+        reference_queryset = ReferenceSample.objects.all()
+        if reference_ids is not None:
+            reference_queryset = reference_queryset.filter(id__in=reference_ids)
         for reference_sample in (
-            ReferenceSample.objects
+            reference_queryset
             .select_related("reference_deposit")
             .prefetch_related("measurements__element")
             .order_by("id")
