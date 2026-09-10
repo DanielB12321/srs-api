@@ -106,6 +106,48 @@ class APIViewRegressionTests(TestCase):
         thread.return_value.start.assert_called_once_with()
 
     @patch("srs.api_views.threading.Thread")
+    def test_analysis_saves_validated_association_options(self, thread):
+        payload = self.sample_payload()
+        payload["association_options"] = {
+            "method": "spearman",
+            "minimum_shared_samples": 8,
+            "minimum_absolute_correlation": 0.6,
+            "maximum_adjusted_p_value": 0.01,
+        }
+
+        response = self.client.post(
+            "/api/full-analysis/",
+            payload,
+            content_type="application/json",
+            **KEY_HEADER,
+        )
+
+        self.assertEqual(response.status_code, 202)
+        analysis = FullAnalysis.objects.get(id=response.json()["full_analysis_id"])
+        self.assertEqual(
+            analysis.parameters["association_options"],
+            payload["association_options"],
+        )
+        thread.return_value.start.assert_called_once_with()
+
+    def test_analysis_rejects_invalid_association_options(self):
+        payload = self.sample_payload()
+        payload["association_options"] = {
+            "method": "spearman",
+            "minimum_shared_samples": 2,
+        }
+
+        response = self.client.post(
+            "/api/full-analysis/",
+            payload,
+            content_type="application/json",
+            **KEY_HEADER,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("at least three", response.json()["error"])
+
+    @patch("srs.api_views.threading.Thread")
     def test_analysis_preserves_the_applied_geographic_filter(self, thread):
         deposit = ReferenceDeposit.objects.create(
             name="Inside deposit",

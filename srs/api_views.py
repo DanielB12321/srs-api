@@ -23,7 +23,10 @@ from rest_framework.views import APIView
 from .algorithms import available_algorithms, default_algorithm_id, get_algorithm
 from .algorithms.base import PairwiseSimilarity
 from .algorithms.knn_aitchison import DEFAULT_DETAIL_TOP_N, DEFAULT_K
-from .associations import calculate_element_associations
+from .associations import (
+    calculate_element_associations,
+    resolve_association_options,
+)
 from .authentication import caller_audit_fields
 from .importers import run_import, run_dataset_import
 from .preprocessing import (
@@ -955,6 +958,9 @@ class FullAnalysisListCreateView(APIView):
             geographic_filter = _normalise_geographic_filter(
                 request.data.get("geographic_filter")
             )
+            association_options = resolve_association_options(
+                request.data.get("association_options")
+            )
         except ValueError as error:
             return Response(
                 {"error": str(error)},
@@ -1078,6 +1084,7 @@ class FullAnalysisListCreateView(APIView):
                 "dataset_name": request.data.get("dataset_name"),
                 "selected_elements": request.data.get("selected_elements") or [],
                 "preprocessing": preprocessing,
+                "association_options": association_options,
                 "geographic_filter": geographic_filter,
                 "similarity_method": similarity_method,
                 "requested_similarity_method": requested_similarity_method,
@@ -1199,6 +1206,7 @@ class FullAnalysisListCreateView(APIView):
                 samples,
                 preprocessing,
                 parameters.get("selected_elements"),
+                parameters.get("association_options"),
             )
             full_analysis.save(update_fields=[
                 "status",

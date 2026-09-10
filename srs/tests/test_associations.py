@@ -3,7 +3,12 @@
 from django.test import SimpleTestCase, TestCase
 
 from ..api_views import FullAnalysisListCreateView
-from ..associations import calculate_element_associations
+from ..associations import (
+    _average_ranks,
+    _two_sided_p_value,
+    calculate_element_associations,
+    resolve_association_options,
+)
 from ..models import FullAnalysis
 
 
@@ -76,6 +81,109 @@ class ElementAssociationTests(SimpleTestCase):
 
         self.assertEqual(result["value_space"], "clr")
         self.assertTrue(result["available"])
+
+    def test_spearman_handles_monotonic_values_and_tied_ranks(self):
+        samples = [
+            sample(f"S{index}", index, 2 ** index)
+            for index in range(1, 11)
+        ]
+
+        spearman = calculate_element_associations(
+            samples,
+            association_options={
+                "method": "spearman",
+                "minimum_shared_samples": 5,
+                "minimum_absolute_correlation": 0.7,
+                "maximum_adjusted_p_value": 0.05,
+            },
+        )
+        pearson = calculate_element_associations(
+            samples,
+            association_options={"method": "pearson"},
+        )
+
+        self.assertEqual(_average_ranks([10, 10, 20]), [1.5, 1.5, 3.0])
+        self.assertEqual(spearman["associations"][0]["correlation"], 1.0)
+        self.assertGreater(
+            spearman["associations"][0]["correlation"],
+            pearson["associations"][0]["correlation"],
+        )
+
+    def test_p_values_match_known_correlation_examples(self):
+        self.assertAlmostEqual(_two_sided_p_value(0.5, 10), 0.141113, places=5)
+        self.assertAlmostEqual(_two_sided_p_value(0.9, 10), 0.000387, places=5)
+        self.assertEqual(_two_sided_p_value(1.0, 10), 0.0)
+
+    def test_filters_use_adjusted_p_value_strength_and_sample_count(self):
+        result = calculate_element_associations(
+            self.samples,
+            association_options={
+                "method": "pearson",
+                "minimum_shared_samples": 5,
+                "minimum_absolute_correlation": 0.7,
+                "maximum_adjusted_p_value": 0.05,
+            },
+        )
+
+        self.assertTrue(result["available"])
+        self.assertEqual(result["filtered_association_count"], 0)
+        self.assertTrue(all(
+            row["adjusted_p_value"] >= row["p_value"]
+            for row in result["associations"]
+        ))
+        self.assertTrue(all(
+            row["reliability"] == "limited"
+            for row in result["associations"]
+        ))
+
+    def test_geochemical_style_missing_and_extreme_values_remain_usable(self):
+        gold = [0.01, 0.03, 0.08, 0.2, 0.7, 1.8, 5.0, 20.0, 120.0, 900.0]
+        arsenic = [2, 3, 5, 9, 16, 30, 55, 110, 250, 600]
+        copper = [35, 12, 70, 20, 55, 18, 90, 25, 45, 30]
+        samples = []
+        for index, (au, arsenic_value, copper_value) in enumerate(
+            zip(gold, arsenic, copper),
+            start=1,
+        ):
+            measurements = [
+                {"element_symbol": "Au", "value": au, "unit": "ppm"},
+                {"element_symbol": "As", "value": arsenic_value, "unit": "ppm"},
+                {"element_symbol": "Cu", "value": copper_value, "unit": "ppm"},
+            ]
+            if index == 4:
+                measurements = [
+                    row for row in measurements
+                    if row["element_symbol"] != "Cu"
+                ]
+            samples.append({
+                "sample_code": f"G{index}",
+                "measurements": measurements,
+            })
+
+        result = calculate_element_associations(
+            samples,
+            preprocessing={"log_transform": True},
+            association_options={
+                "method": "spearman",
+                "minimum_shared_samples": 5,
+                "minimum_absolute_correlation": 0.7,
+                "maximum_adjusted_p_value": 0.05,
+            },
+        )
+        au_as = next(
+            row for row in result["associations"]
+            if {row["element_a"], row["element_b"]} == {"Au", "As"}
+        )
+
+        self.assertEqual(au_as["correlation"], 1.0)
+        self.assertEqual(au_as["reliability"], "moderate")
+        self.assertTrue(au_as["passes_filters"])
+
+    def test_invalid_association_settings_are_rejected(self):
+        with self.assertRaisesMessage(ValueError, "Pearson or Spearman"):
+            resolve_association_options({"method": "made-up"})
+        with self.assertRaisesMessage(ValueError, "at least three"):
+            resolve_association_options({"minimum_shared_samples": 2})
 
 
 
