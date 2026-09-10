@@ -23,6 +23,7 @@ from rest_framework.views import APIView
 from .algorithms import available_algorithms, default_algorithm_id, get_algorithm
 from .algorithms.base import PairwiseSimilarity
 from .algorithms.knn_aitchison import DEFAULT_DETAIL_TOP_N, DEFAULT_K
+from .associations import calculate_element_associations
 from .authentication import caller_audit_fields
 from .importers import run_import, run_dataset_import
 from .preprocessing import (
@@ -105,9 +106,9 @@ def _normalise_geographic_filter(raw_filter):
         raise ValueError(
             "The geographic filter centre is outside the valid coordinate range."
         )
-    if not 0 < radius_km <= 10000:
+    if not 0 < radius_km <= 5000:
         raise ValueError(
-            "The geographic filter radius must be between 0 and 10,000 km."
+            "The geographic filter radius must be between 0 and 5,000 km."
         )
     return {
         "enabled": True,
@@ -1194,12 +1195,18 @@ class FullAnalysisListCreateView(APIView):
                     parameters.get("selected_elements"),
                 ),
             )
+            full_analysis.element_associations = calculate_element_associations(
+                samples,
+                preprocessing,
+                parameters.get("selected_elements"),
+            )
             full_analysis.save(update_fields=[
                 "status",
                 "completed_at",
                 "runtime_ms",
                 "sample_results",
                 "projection",
+                "element_associations",
             ])
         except Exception as error:
             logger.exception("Full analysis %s failed", full_analysis_id)
@@ -1785,6 +1792,7 @@ class FullAnalysisResultView(APIView):
             "analysed_samples": analysed_samples,
             "sample_results": full_analysis.sample_results,
             "projection": full_analysis.projection,
+            "element_associations": full_analysis.element_associations,
             "warnings": full_analysis.warnings,
         })
 

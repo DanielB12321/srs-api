@@ -321,6 +321,7 @@ class FullAnalysis(models.Model):
     # matching capability, so they stay null for the concentration-based methods.
     sample_results = models.JSONField(null=True, blank=True)
     projection = models.JSONField(null=True, blank=True)
+    element_associations = models.JSONField(null=True, blank=True)
     warnings = models.JSONField(default=list, blank=True)
 
     status = models.CharField(

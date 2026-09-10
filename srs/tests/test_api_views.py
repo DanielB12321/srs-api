@@ -148,6 +148,27 @@ class APIViewRegressionTests(TestCase):
         self.assertEqual(analysis.parameters["reference_count"], 1)
         thread.return_value.start.assert_called_once_with()
 
+    @patch("srs.api_views.threading.Thread")
+    def test_analysis_rejects_a_radius_above_5000_km(self, thread):
+        payload = self.sample_payload()
+        payload["geographic_filter"] = {
+            "enabled": True,
+            "center": {"latitude": -20.0, "longitude": 130.0},
+            "radius_km": 5001,
+        }
+
+        response = self.client.post(
+            "/api/full-analysis/",
+            payload,
+            content_type="application/json",
+            **KEY_HEADER,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("5,000 km", response.json()["error"])
+        self.assertFalse(FullAnalysis.objects.exists())
+        thread.return_value.start.assert_not_called()
+
     def test_reference_location_list_uses_deposit_coordinates_as_fallback(self):
         deposit = ReferenceDeposit.objects.create(
             name="Mapped deposit",
