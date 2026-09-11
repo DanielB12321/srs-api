@@ -40,11 +40,13 @@ from .models import (
     Dataset,
     FullAnalysis,
     FullAnalysisMatch,
+    GeochemicalSignature,
     ReferenceImport,
     ReferenceSample,
     Sample,
     SampleMeasurement,
 )
+from .signatures import save_analysis_signatures, serialize_signature
 from .projections import fit_pca, project_points
 from .serializers import (
     DatasetSerializer,
@@ -1208,6 +1210,12 @@ class FullAnalysisListCreateView(APIView):
                 parameters.get("selected_elements"),
                 parameters.get("association_options"),
             )
+            save_analysis_signatures(
+                full_analysis,
+                samples,
+                preprocessing,
+                parameters.get("selected_elements"),
+            )
             full_analysis.save(update_fields=[
                 "status",
                 "completed_at",
@@ -1774,6 +1782,11 @@ class FullAnalysisResultView(APIView):
             }
             for sample_index, sample in enumerate(saved_samples)
         ]
+        composite_signature = (
+            full_analysis.signatures
+            .filter(kind=GeochemicalSignature.KIND_COMPOSITE)
+            .first()
+        )
 
         # This endpoint stays lightweight even when every sample has thousands
         # of matches. Sample measurements and matches have their own endpoint.
@@ -1801,7 +1814,57 @@ class FullAnalysisResultView(APIView):
             "sample_results": full_analysis.sample_results,
             "projection": full_analysis.projection,
             "element_associations": full_analysis.element_associations,
+            "signature_profile": (
+                serialize_signature(composite_signature)
+                if composite_signature else None
+            ),
+            "signature_count": full_analysis.signatures.count(),
             "warnings": full_analysis.warnings,
+        })
+
+
+class FullAnalysisSignatureListView(APIView):
+    """Return the reusable sample and composite profiles saved for a run."""
+
+    @extend_schema(
+        operation_id="full_analysis_signatures",
+        parameters=[
+            OpenApiParameter(
+                "kind",
+                OpenApiTypes.STR,
+                description="Optional profile kind: sample or composite.",
+            ),
+        ],
+        responses={200: OpenApiTypes.OBJECT},
+    )
+    def get(self, request, full_analysis_id):
+        try:
+            full_analysis = FullAnalysis.objects.get(id=full_analysis_id)
+        except FullAnalysis.DoesNotExist:
+            return Response(
+                {"error": f"Full analysis {full_analysis_id} was not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        signatures = full_analysis.signatures.all()
+        kind = str(request.query_params.get("kind") or "").strip().lower()
+        if kind:
+            valid_kinds = {
+                GeochemicalSignature.KIND_SAMPLE,
+                GeochemicalSignature.KIND_COMPOSITE,
+            }
+            if kind not in valid_kinds:
+                return Response(
+                    {"error": "kind must be either 'sample' or 'composite'."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            signatures = signatures.filter(kind=kind)
+
+        results = [serialize_signature(signature) for signature in signatures]
+        return Response({
+            "full_analysis_id": full_analysis.id,
+            "count": len(results),
+            "results": results,
         })
 
 

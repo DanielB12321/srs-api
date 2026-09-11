@@ -10,6 +10,7 @@ from .api_views import (
     FullAnalysisMapView,
     FullAnalysisMatchEvidenceView,
     FullAnalysisResultView,
+    FullAnalysisSignatureListView,
     FullAnalysisSampleMapView,
     FullAnalysisSampleResultView,
     ReferenceImportViewSet,
@@ -55,6 +56,10 @@ urlpatterns = [
     path("algorithms/", SimilarityAlgorithmListView.as_view()),
     path("full-analysis/", FullAnalysisListCreateView.as_view()),
     path("full-analysis/<int:full_analysis_id>/", FullAnalysisResultView.as_view()),
+    path(
+        "full-analysis/<int:full_analysis_id>/signatures/",
+        FullAnalysisSignatureListView.as_view(),
+    ),
     path(
         "full-analysis/<int:full_analysis_id>/map/",
         FullAnalysisMapView.as_view(),

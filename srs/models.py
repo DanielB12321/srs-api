@@ -343,6 +343,49 @@ class FullAnalysis(models.Model):
         return self.name or f"Full analysis {self.id}"
 
 
+class GeochemicalSignature(models.Model):
+    """A reusable multi-element profile saved from an analysed sample."""
+
+    KIND_SAMPLE = "sample"
+    KIND_COMPOSITE = "composite"
+    KIND_CHOICES = [
+        (KIND_SAMPLE, "Analysed sample"),
+        (KIND_COMPOSITE, "Analysis composite"),
+    ]
+
+    full_analysis = models.ForeignKey(
+        FullAnalysis,
+        on_delete=models.CASCADE,
+        related_name="signatures",
+    )
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES)
+    # Composite profiles use -1; sample profiles use their zero-based row index.
+    sample_index = models.IntegerField(default=-1)
+    sample_code = models.CharField(max_length=100, blank=True)
+    representative_method = models.CharField(max_length=30)
+    value_space = models.CharField(max_length=20, default="ppm")
+    elements = models.JSONField(default=list)
+    raw_vector = models.JSONField(default=dict)
+    vector = models.JSONField(default=dict)
+    imputed_elements = models.JSONField(default=list)
+    preprocessing = models.JSONField(default=dict)
+    pipeline_version = models.CharField(max_length=20, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["sample_index", "kind"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["full_analysis", "kind", "sample_index"],
+                name="unique_analysis_signature",
+            ),
+        ]
+
+    def __str__(self):
+        label = self.sample_code or self.get_kind_display()
+        return f"{self.full_analysis} - {label} signature"
+
+
 class FullAnalysisInputMeasurement(models.Model):
     """A legacy input reading kept for older single-sample analyses."""
 
