@@ -1878,6 +1878,149 @@ class FullAnalysisSampleResultView(FullAnalysisResultView):
         })
 
 
+class FullAnalysisMatchEvidenceView(APIView):
+    """Calculate and cache evidence for one saved ranked match."""
+
+    @extend_schema(
+        operation_id="full_analysis_match_evidence",
+        request=None,
+        responses={200: OpenApiTypes.OBJECT},
+    )
+    def post(self, request, full_analysis_id, sample_index, rank):
+        try:
+            full_analysis = FullAnalysis.objects.get(id=full_analysis_id)
+        except FullAnalysis.DoesNotExist:
+            return Response(
+                {"error": f"Full analysis {full_analysis_id} was not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        saved_samples = FullAnalysisResultView().get_saved_samples(full_analysis)
+        if sample_index < 0 or sample_index >= len(saved_samples):
+            return Response(
+                {"error": f"Sample index {sample_index} was not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            match = (
+                full_analysis.ranked_matches
+                .select_related(
+                    "reference_sample",
+                    "reference_sample__reference_deposit",
+                )
+                .get(analysed_sample_index=sample_index, rank=rank)
+            )
+        except FullAnalysisMatch.DoesNotExist:
+            return Response(
+                {"error": f"Ranked match {rank} was not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # An evidence object, including an empty unavailable result, means this
+        # match has already been checked and no calculation needs repeating.
+        if match.evidence is not None:
+            return Response(self.serialize_evidence(match, cached=True))
+
+        if match.reference_sample_id is None:
+            match.evidence = self.unavailable_evidence(
+                "The reference sample used by this saved match no longer exists."
+            )
+            match.save(update_fields=["evidence"])
+            return Response(self.serialize_evidence(match, cached=False))
+
+        parameters = _as_json_object(full_analysis.parameters)
+        options = resolve_options(
+            parameters.get("preprocessing"),
+            parameters.get("selected_elements"),
+        )
+        input_values, input_imputed = extract_values(
+            saved_samples[sample_index].get("measurements") or [],
+            options,
+        )
+        if not input_values:
+            match.evidence = self.unavailable_evidence(
+                "The analysed sample has no valid measurements for this comparison."
+            )
+            match.save(update_fields=["evidence"])
+            return Response(self.serialize_evidence(match, cached=False))
+
+        algorithm = get_algorithm(
+            full_analysis.algorithm_id
+            or parameters.get("similarity_method")
+            or full_analysis.method
+        )
+        if "evidence" not in algorithm.capabilities:
+            match.evidence = self.unavailable_evidence(
+                "The selected similarity algorithm does not provide element evidence."
+            )
+            match.save(update_fields=["evidence"])
+            return Response(self.serialize_evidence(match, cached=False))
+
+        neighbours = max(1, int(parameters.get("k", DEFAULT_K)))
+        nearest_candidates = list(
+            full_analysis.ranked_matches
+            .filter(
+                analysed_sample_index=sample_index,
+                reference_sample_id__isnull=False,
+            )
+            .order_by("rank")
+            .values_list("similarity_score", "reference_sample_id")[:neighbours]
+        )
+        detail = FullAnalysisListCreateView().build_match_detail(
+            algorithm,
+            input_values,
+            input_imputed,
+            [(match.similarity_score, match.reference_sample_id)],
+            options,
+            nearest_candidates=nearest_candidates,
+        ).get(match.reference_sample_id, {})
+
+        update_fields = []
+        for field in ("scores", "confidence", "evidence"):
+            if field in detail:
+                setattr(match, field, detail[field])
+                update_fields.append(field)
+
+        if "evidence" not in update_fields:
+            match.evidence = self.unavailable_evidence(
+                "No element contribution could be calculated for this match."
+            )
+            update_fields.append("evidence")
+
+        match.save(update_fields=update_fields)
+        return Response(self.serialize_evidence(match, cached=False))
+
+    @staticmethod
+    def unavailable_evidence(message):
+        return {
+            "supporting": [],
+            "conflicting": [],
+            "available": False,
+            "message": message,
+        }
+
+    @staticmethod
+    def serialize_evidence(match, cached):
+        evidence = match.evidence or {}
+        entries = (
+            list(evidence.get("supporting") or [])
+            + list(evidence.get("conflicting") or [])
+        )
+        return {
+            "full_analysis_id": match.full_analysis_id,
+            "sample_index": match.analysed_sample_index,
+            "rank": match.rank,
+            "reference_sample_id": match.reference_sample_id,
+            "available": bool(entries),
+            "cached": cached,
+            "message": evidence.get("message"),
+            "evidence": evidence,
+            "scores": match.scores,
+            "confidence": match.confidence,
+        }
+
+
 class FullAnalysisSampleMapView(FullAnalysisResultView):
     """Return map coordinates for one sample's ranked references."""
 

@@ -211,6 +211,54 @@ class MatchDetailTests(PersistenceTestCase):
         self.assertIsNotNone(matches[1].evidence)
         self.assertIsNone(matches[2].evidence)
 
+    def test_evidence_outside_the_initial_limit_is_generated_and_cached(self):
+        full_analysis = self.run_analysis(
+            "log_difference_similarity",
+            detail_top_n=1,
+        )
+        last_match = self.matches(full_analysis)[-1]
+        self.assertIsNone(last_match.evidence)
+
+        endpoint = (
+            f"/api/full-analysis/{full_analysis.id}/samples/0/"
+            f"matches/{last_match.rank}/evidence/"
+        )
+        first_response = self.client.post(
+            endpoint,
+            data={},
+            content_type="application/json",
+        )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertFalse(first_response.json()["cached"])
+        self.assertTrue(first_response.json()["available"])
+        last_match.refresh_from_db()
+        self.assertIsNotNone(last_match.evidence)
+
+        second_response = self.client.post(
+            endpoint,
+            data={},
+            content_type="application/json",
+        )
+        self.assertEqual(second_response.status_code, 200)
+        self.assertTrue(second_response.json()["cached"])
+        self.assertEqual(
+            second_response.json()["evidence"],
+            first_response.json()["evidence"],
+        )
+
+    def test_evidence_request_rejects_an_unknown_rank(self):
+        full_analysis = self.run_analysis(detail_top_n=1)
+
+        response = self.client.post(
+            f"/api/full-analysis/{full_analysis.id}/samples/0/"
+            "matches/99/evidence/",
+            data={},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+
     def test_detail_limit_is_independent_of_the_confidence_neighbour_count(self):
         matches = self.matches(
             self.run_analysis("knn_aitchison", detail_top_n=3, k=1)

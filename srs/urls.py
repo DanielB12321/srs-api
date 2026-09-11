@@ -8,6 +8,7 @@ from .api_views import (
     DatasetViewSet,
     FullAnalysisListCreateView,
     FullAnalysisMapView,
+    FullAnalysisMatchEvidenceView,
     FullAnalysisResultView,
     FullAnalysisSampleMapView,
     FullAnalysisSampleResultView,
@@ -61,6 +62,11 @@ urlpatterns = [
     path(
         "full-analysis/<int:full_analysis_id>/samples/<int:sample_index>/",
         FullAnalysisSampleResultView.as_view(),
+    ),
+    path(
+        "full-analysis/<int:full_analysis_id>/samples/<int:sample_index>/"
+        "matches/<int:rank>/evidence/",
+        FullAnalysisMatchEvidenceView.as_view(),
     ),
     path(
         "full-analysis/<int:full_analysis_id>/samples/<int:sample_index>/map/",
