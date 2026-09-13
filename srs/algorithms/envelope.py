@@ -1,4 +1,4 @@
-"""Serializable result objects shared by all algorithms."""
+"""Shared result objects that can be turned into API JSON."""
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -34,7 +34,7 @@ class Match:
     deposit_id: str = ""
     deposit_name: str = ""
     deposit_class: str = ""
-    # Extra metrics keep their own names beside the normalised score.
+    # Keep extra metrics, like distance, alongside the usual similarity score.
     scores: dict = field(default_factory=dict)
     confidence: Optional[dict] = None
     supporting: list = field(default_factory=list)
@@ -103,7 +103,7 @@ class RunResult:
             "warnings": list(self.warnings),
         }
 
-        # Leave unsupported result sections out instead of returning null.
+        # Only add these sections when the algorithm actually returned them.
         if self.sample_results is not None:
             envelope["sample_results"] = self.sample_results
 

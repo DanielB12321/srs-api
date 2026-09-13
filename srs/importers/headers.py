@@ -18,6 +18,7 @@ def forward_fill(row: Iterable) -> list:
 
 def flatten_headers(row1: Iterable, row2: Iterable) -> list[tuple[str, str]]:
     """Combine group and detail rows into one tuple per column."""
+    # The top row groups columns; the second row gives each column's own heading.
     filled = forward_fill(row1)
     return [(g or "", d or "") for g, d in zip(filled, row2)]
 

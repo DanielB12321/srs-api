@@ -42,6 +42,7 @@ class ElementViewSet(viewsets.ModelViewSet):
 
 
 class ReferenceDepositViewSet(viewsets.ModelViewSet):
+    # Count related samples in the query so each deposit card doesn't need another request.
     queryset = (
         ReferenceDeposit.objects
         .annotate(sample_count=Count("reference_samples"))
@@ -69,6 +70,7 @@ class ReferenceSampleMeasurementViewSet(viewsets.ModelViewSet):
             .get_queryset()
             .select_related("element", "reference_sample")
         )
+        # The detail drawer asks for one sample's measurements using this filter.
         reference_sample_id = self.request.query_params.get("reference_sample")
         if reference_sample_id:
             queryset = queryset.filter(reference_sample_id=reference_sample_id)

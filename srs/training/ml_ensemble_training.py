@@ -334,6 +334,7 @@ def run_grouped_cross_validation(
     development_labels = development[TARGET_COLUMN].astype(str).to_numpy()
     development_groups = development[GROUP_COLUMN].astype(str).to_numpy()
 
+    # Keep each deposit in one fold so its samples can't appear in both training and validation.
     splitter = StratifiedGroupKFold(
         n_splits=N_CV_SPLITS,
         shuffle=True,
@@ -359,6 +360,7 @@ def run_grouped_cross_validation(
                 f"Deposit leakage in CV fold {fold_number}: {sorted(overlap)}"
             )
 
+        # Fixed seeds make this run repeatable, while giving each fold its own sample pairs.
         train_rng = np.random.default_rng(RANDOM_STATE + fold_number)
         validation_rng = np.random.default_rng(RANDOM_STATE + 100 + fold_number)
 
@@ -424,6 +426,7 @@ def run_grouped_cross_validation(
         .reset_index(drop=True)
     )
 
+    # The summary is sorted by validation results, so the first row is our chosen setup.
     best = summary.iloc[0]
     selected = {
         "svm_name": str(best["svm_name"]),
@@ -496,9 +499,10 @@ def train_from_file(
     dataframe = load_data(input_path, sheet_name)
     elements = identify_elements(dataframe)
 
-    # This is the same preprocessing resolver used by production algorithms.
+    # Clean training pairs with the same settings the API uses when scoring real samples.
     options = resolve_options(preprocessing_request)
 
+    # Put aside the final test deposits before choosing any model settings.
     development_indices, final_test_indices = make_final_split(dataframe)
 
     selected, fold_results, cv_summary = run_grouped_cross_validation(
@@ -537,6 +541,7 @@ def train_from_file(
         dataframe.iloc[final_test_indices][GROUP_COLUMN].astype(str)
     )
 
+    # Save the training setup with the models so the API knows how to use them.
     manifest = {
         "algorithm_id": "xgboost_rbf_svm_ensemble",
         "version": "1.0.0",

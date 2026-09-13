@@ -47,8 +47,7 @@ router.register("samples", SampleViewSet)
 router.register("sample-measurements", SampleMeasurementViewSet)
 
 urlpatterns = [
-    # Keep this before router.urls so "bulk-details" is not interpreted as a
-    # ReferenceSample primary key by the router's detail route.
+    # Put this before the router so it treats "bulk-details" as a path, not a sample ID.
     path("reference-samples/bulk-details/", BulkReferenceSampleDetailView.as_view()),
     path("reference-samples/locations/", ReferenceSampleLocationListView.as_view()),
     path("", include(router.urls)),

@@ -41,6 +41,7 @@ class Command(BaseCommand):
         if not meta_path.is_file():
             raise CommandError(f"Metadata file not found: {meta_path}")
 
+        # Check the file contents, not just the names, before importing the same pair again.
         data_hash = _sha256_of_file(data_path)
         meta_hash = _sha256_of_file(meta_path)
 

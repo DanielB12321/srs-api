@@ -176,19 +176,15 @@ MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
-# Which similarity algorithm runs when a request does not name one. Must match
-# an id registered in srs/algorithms/__init__.py; an unrecognised value falls
-# back to the registry's FALLBACK_ALGORITHM_ID rather than stopping the
-# service. knn_aitchison per the 2026-08/09 benchmarks: best or tied-best
-# under every preprocessing configuration, immune to preprocessing mistakes,
-# and the only algorithm with per-element evidence output.
+# Default method for requests that don't choose one.
+# Use an ID from srs/algorithms/__init__.py; unknown IDs fall back to that registry's default.
 SRS_DEFAULT_ALGORITHM = os.environ.get(
     "SRS_DEFAULT_ALGORITHM",
     "knn_aitchison",
 )
 
-# Secret used only for server-to-server calls from the SRS website. There is
-# deliberately no development fallback: an omitted value keeps the API closed.
+# The website server uses this key to call the API. Keep it out of browser code.
+# Leaving it unset makes the API reject requests.
 SRS_API_SHARED_KEY = os.environ.get("SRS_API_SHARED_KEY", "")
 
 CORS_ALLOWED_ORIGINS = [

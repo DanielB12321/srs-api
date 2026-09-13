@@ -298,7 +298,7 @@ def _delete_failed_dataset(dataset):
     stored_file = dataset.uploaded_file
 
     with transaction.atomic():
-        # Explicitly remove any partially imported data.
+        # Clear any rows left behind by the failed import.
         SampleMeasurement.objects.filter(
             sample__dataset=dataset
         ).delete()
@@ -762,7 +762,7 @@ class BulkReferenceSampleDetailView(APIView):
         )
         samples_by_id = {sample.id: sample for sample in samples}
 
-        # Preserve the ranked ID order supplied by the results page.
+        # Send details back in the same ranked order the results page asked for.
         results = [
             self.serialize_sample(samples_by_id[sample_id])
             for sample_id in sample_ids
@@ -1057,8 +1057,7 @@ class FullAnalysisListCreateView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Keep the value positive, but do not impose an upper limit. Large result
-        # sets are exposed through the paginated per-sample results endpoint.
+        # Allow a complete ranking. The results endpoint sends it back one page at a time.
         top_n = max(1, top_n)
         if reference_count:
             top_n = min(top_n, reference_count)
@@ -1066,7 +1065,7 @@ class FullAnalysisListCreateView(APIView):
         sample_snapshot = dict(request.data)
         sample_snapshot["samples"] = samples
 
-        # Resolve once so every saved field names the algorithm that will run.
+        # Resolve the method now so the saved name matches the algorithm we actually run.
         requested_similarity_method = similarity_method
         resolved_algorithm = get_algorithm(similarity_method)
         similarity_method = resolved_algorithm.id
@@ -1107,8 +1106,8 @@ class FullAnalysisListCreateView(APIView):
             ),
         )
 
-        # Return immediately instead of holding an HTTP request open for the
-        # complete calculation. Each thread opens its own database connection.
+        # Run the calculation in the background so the browser can show progress.
+        # The worker uses its own database connection.
         threading.Thread(
             target=self.process_full_analysis,
             args=(full_analysis.id,),
@@ -1127,7 +1126,7 @@ class FullAnalysisListCreateView(APIView):
         )
 
     def process_full_analysis(self, full_analysis_id):
-        """Process every tested sample in bounded reference-library batches."""
+        """Work through each sample, loading the reference library in batches."""
         close_old_connections()
 
         try:
@@ -1150,8 +1149,7 @@ class FullAnalysisListCreateView(APIView):
                 )
             algorithm = get_algorithm(similarity_method)
 
-            # Provenance is written before the work starts, so a run that fails
-            # partway still records what was scoring it.
+            # Save the method and versions first, even if this run fails later.
             full_analysis.status = FullAnalysis.STATUS_RUNNING
             full_analysis.algorithm_id = algorithm.id
             full_analysis.algorithm_version = algorithm.version
@@ -1166,6 +1164,7 @@ class FullAnalysisListCreateView(APIView):
             ])
             started = perf_counter()
 
+            # Give every uploaded row its own ranking and progress count.
             for sample_index, sample in enumerate(samples):
                 parameters.update({
                     "current_sample_index": sample_index,
@@ -1381,8 +1380,7 @@ class FullAnalysisListCreateView(APIView):
         reference_ids=None,
     ):
         """Compare one analysed sample with the reference library."""
-        # Resolved once, outside the reference loop, so policy names are not
-        # revalidated on every one of a thousand comparisons.
+        # Reuse the same cleanup settings for every reference in this sample's ranking.
         saved_parameters = _as_json_object(full_analysis.parameters)
         options = resolve_options(
             preprocessing,
@@ -1390,9 +1388,7 @@ class FullAnalysisListCreateView(APIView):
         )
         algorithm = get_algorithm(similarity_method)
 
-        # An algorithm that needs the whole library at once cannot be driven by
-        # the streaming heap below, so it gets its own path. Without this a
-        # non-pairwise algorithm would be selectable and then silently fail.
+        # Some methods need the whole library at once, so they use a separate path.
         if not isinstance(algorithm, PairwiseSimilarity):
             return self.create_ranked_matches_via_compare(
                 algorithm,
@@ -1405,14 +1401,11 @@ class FullAnalysisListCreateView(APIView):
                 reference_ids,
             )
 
-        # A symbol-to-value dictionary makes finding shared elements inexpensive.
-        # The pipeline handles unit conversion, the censored-data policy, and
-        # the user's element selection.
+        # Clean the measurements into an element-to-ppm lookup before comparing them.
         input_values, input_imputed = extract_values(measurements, options)
 
-        # Keep one global bounded heap across every batch. This guarantees the
-        # final ranking is the best top_n from the complete reference library,
-        # rather than a separate partial ranking from each batch.
+        # Keep the best top_n matches across all batches in one heap.
+        # A heap keeps the lowest score at the front, ready to replace with a better one.
         best_matches = []
         reference_queryset = ReferenceSample.objects.all()
         if reference_ids is not None:
@@ -1635,8 +1628,7 @@ class FullAnalysisListCreateView(APIView):
         )
         by_id = {sample.id: sample for sample in reference_samples}
 
-        # Which deposits the nearest references belong to, in rank order. This
-        # is what lets an algorithm judge a match by the company it keeps.
+        # Confidence checks how many nearby references come from the same deposit.
         nearest_deposits = []
         for _, reference_sample_id in nearest_candidates:
             reference_sample = by_id.get(reference_sample_id)
@@ -1788,8 +1780,7 @@ class FullAnalysisResultView(APIView):
             .first()
         )
 
-        # This endpoint stays lightweight even when every sample has thousands
-        # of matches. Sample measurements and matches have their own endpoint.
+        # Send just the summary here. Measurements and rankings load separately.
         return Response({
             "full_analysis_id": full_analysis.id,
             "full_analysis": {
@@ -1980,8 +1971,7 @@ class FullAnalysisMatchEvidenceView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # An evidence object, including an empty unavailable result, means this
-        # match has already been checked and no calculation needs repeating.
+        # An empty evidence result is still a saved answer, so don't calculate it again.
         if match.evidence is not None:
             return Response(self.serialize_evidence(match, cached=True))
 
@@ -2172,8 +2162,7 @@ class FullAnalysisMapView(FullAnalysisResultView):
             )
 
         saved_samples = self.get_saved_samples(full_analysis)
-        # Ordering by score means the first row encountered for a reference is
-        # its best result across all uploaded/analysed samples.
+        # Each reference appears once on the map, using its best score across the samples.
         best_matches = {}
         for match in (
             full_analysis.ranked_matches

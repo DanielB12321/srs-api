@@ -63,9 +63,8 @@ EXPECTED_SCORES = {
             "swapped": 0.75,
         },
     },
-    # Identical rows across all three states are the point: knn_aitchison does
-    # its own compositional handling, so the preprocessing toggles cannot move
-    # its scores. That independence is why it makes a safe default.
+    # Aitchison centres the logs itself, so all three preprocessing options
+    # should give these same scores.
     "knn_aitchison": {
         "no_preprocessing": {
             "identical": 1.0,

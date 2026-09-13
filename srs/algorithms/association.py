@@ -25,4 +25,5 @@ class AssociationSimilarity(PairwiseSimilarity):
         ) ** 0.5
         cosine = numerator / denominator if denominator else 0
 
+        # Convert the direction comparison to the same 0 to 1 range as other methods.
         return max(0, min(1, (cosine + 1) / 2))

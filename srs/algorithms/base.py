@@ -19,7 +19,7 @@ def weighted_mean(values, weights=None):
 
 
 def weighted_dot(left, right, weights=None):
-    """Dot product, honouring per-element weights when there are any."""
+    """Multiply matching values and add them up, using weights if supplied."""
     if weights is None:
         return sum(
             left_value * right_value
@@ -41,6 +41,7 @@ def signed_evidence(prepared, raw_contributions):
     ]
     total = sum(abs(contribution) for contribution in weighted)
 
+    # Use the total size of the effects so positive and negative ones don't cancel out.
     if not total:
         return [], []
 
@@ -68,11 +69,11 @@ def signed_evidence(prepared, raw_contributions):
 class SimilarityAlgorithm(ABC):
     """Interface for scoring samples against a reference library."""
 
-    # Registry key sent as ``similarity_method``.
+    # This is the name the website sends as similarity_method.
     id: str = ""
-    # Bump when score calculations change.
+    # Update this when the score calculation changes.
     version: str = "0.0.0"
-    # Optional result sections produced by the algorithm.
+    # Extra result sections this algorithm can provide.
     capabilities: frozenset = frozenset()
 
     def raw_scores(self, prepared):
@@ -142,7 +143,7 @@ class PairwiseSimilarity(SimilarityAlgorithm):
         """Rank every reference for each supplied sample."""
         config = config or {}
         top_n = int(config.get("top_n", 200))
-        # Resolve once before the reference loop.
+        # Work out the settings once, then reuse them for every reference.
         options = resolve_options(
             config.get("preprocessing"),
             config.get("selected_elements"),
@@ -162,8 +163,8 @@ class PairwiseSimilarity(SimilarityAlgorithm):
             for reference in reference_list
         }
 
-        # Evidence is deliberately limited to the leading matches so a large
-        # complete ranking does not spend time building detail nobody sees.
+        # Only build evidence for the top matches here to keep large runs quick.
+        # The API can load evidence for other matches when someone opens them.
         for sample, ranking in zip(samples, rankings):
             input_values = sample.get("values") or {}
             input_imputed = set(sample.get("imputed") or ())
@@ -249,9 +250,7 @@ class PairwiseSimilarity(SimilarityAlgorithm):
                 reference,
             ))
 
-        # Ties break on the higher reference ID, matching how the API's bounded
-        # heap orders equal scores. Keeping the two consistent means a match
-        # list does not reorder itself depending on which path produced it.
+        # If scores tie, put the higher reference ID first, just like the API does.
         scored.sort(key=lambda item: (-item[0], -(item[1].get("id") or 0)))
 
         return [

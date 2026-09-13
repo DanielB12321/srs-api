@@ -65,6 +65,7 @@ def _canonical_component(vector):
 def _jacobi_eigen(matrix):
     """Return eigenpairs for a symmetric matrix using Jacobi rotations."""
     size = len(matrix)
+    # Work on a copy: the rotations below gradually find the main directions of variation.
     a = [row[:] for row in matrix]
     vectors = [
         [1.0 if row == column else 0.0 for column in range(size)]
@@ -128,6 +129,7 @@ def fit_pca(rows, n_components=2, min_coverage=DEFAULT_MIN_COVERAGE):
             if value is not None and value > 0:
                 counts[symbol] = counts.get(symbol, 0) + 1
 
+    # Only plot elements measured in most rows, so missing values don't drive the layout.
     threshold = len(rows) * min_coverage
     symbols = sorted(
         symbol
@@ -171,6 +173,7 @@ def fit_pca(rows, n_components=2, min_coverage=DEFAULT_MIN_COVERAGE):
             covariance[a][b] /= divisor
             covariance[b][a] = covariance[a][b]
 
+    # Use the directions with the most variation as the chart axes.
     pairs = _jacobi_eigen(covariance)
     total = sum(max(0.0, value) for value, _ in pairs) or 1.0
 

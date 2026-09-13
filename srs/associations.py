@@ -1,4 +1,4 @@
-"""Analysis-wide relationships between uploaded sample elements."""
+"""Work out which elements rise or fall together across the uploaded samples."""
 
 from math import exp, isfinite, lgamma, log, log1p, sqrt
 
@@ -102,6 +102,7 @@ def _average_ranks(values):
 
 
 def _correlation(left, right, method):
+    # Spearman uses the order of the values instead of their actual concentrations.
     if method == "spearman":
         return _pearson(_average_ranks(left), _average_ranks(right))
     return _pearson(left, right)
@@ -109,6 +110,8 @@ def _correlation(left, right, method):
 
 def _beta_continued_fraction(a, b, x):
     """Evaluate the continued fraction used by the incomplete beta function."""
+    # This is the numerical part of the p-value calculation below.
+    # Stop once the answer settles, and keep denominators away from zero.
     maximum_iterations = 200
     tolerance = 3e-14
     tiny = 1e-300
@@ -152,7 +155,7 @@ def _beta_continued_fraction(a, b, x):
 
 
 def _regularized_incomplete_beta(a, b, x):
-    """Return the regularized incomplete beta without adding SciPy to deploys."""
+    """Work out the beta function needed for the correlation p-value."""
     if x <= 0:
         return 0.0
     if x >= 1:
@@ -191,6 +194,7 @@ def _apply_false_discovery_rate(associations):
     total = len(ordered)
     running_minimum = 1.0
 
+    # Adjust for testing lots of pairs, working backwards to keep the limits consistent.
     for reverse_index in range(total - 1, -1, -1):
         original_index, row = ordered[reverse_index]
         rank = reverse_index + 1
@@ -263,6 +267,7 @@ def calculate_element_associations(
 
     for left_index, left_symbol in enumerate(eligible_elements):
         for right_symbol in eligible_elements[left_index + 1:]:
+            # Only compare rows that have a measurement for both elements.
             pairs = [
                 (values[left_symbol], values[right_symbol])
                 for values in transformed_samples
@@ -280,9 +285,7 @@ def calculate_element_associations(
             if correlation is None:
                 continue
 
-            # Keep full precision for the significance test. The rounded value
-            # is only used in the response so a near-perfect relationship is
-            # not accidentally treated as a mathematically perfect one.
+            # Work out the p-value before rounding, so almost-perfect isn't treated as perfect.
             p_value = _two_sided_p_value(correlation, shared_count)
             correlation = round(correlation, 6)
             key = (left_symbol, right_symbol)
@@ -334,6 +337,7 @@ def calculate_element_associations(
             strongest_by_element[row["element_b"]], strength
         )
 
+    # Keep the heatmap to 40 useful elements. The full pair list is still saved.
     matrix_elements = sorted(
         sorted(
             eligible_elements,

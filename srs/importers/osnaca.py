@@ -51,6 +51,7 @@ def run_import(import_id: int) -> ReferenceImport:
     meta_wb = None
 
     try:
+        # If anything fails, roll back the import so we don't leave half a library saved.
         with transaction.atomic():
             data_wb = openpyxl.load_workbook(
                 import_row.data_file.path, read_only=True, data_only=True
@@ -122,6 +123,7 @@ def seed_lookups(meta_wb) -> None:
         update_fields=["name"],
     )
 
+    # Merged class cells are blank on later rows, so keep the last class we saw.
     ws = meta_wb["Ore Deposit Classification"]
     current_class = None
     seen_cls: set = set()
@@ -265,6 +267,7 @@ def load_samples(meta_wb, import_row, deposits_by_code, stats, errors):
 
 def _build_sample_metadata(row, minerals_by_code: dict) -> dict:
     """Keep optional workbook fields in the sample metadata."""
+    # These positions follow the fixed column layout in the OSNACA metadata workbook.
     mineral_codes = [c for c in row[17:25] if c]
     minerals = [
         minerals_by_code[code]
@@ -371,6 +374,7 @@ def load_measurements(data_wb, import_row, samples_by_code, stats, errors):
                 below = False
                 detection_limit = None
                 value = cell
+                # OSNACA uses a negative number to mark the detection limit, not a real value.
                 if cell < 0:
                     below = True
                     detection_limit = abs(cell)

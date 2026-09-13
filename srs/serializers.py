@@ -27,6 +27,7 @@ class BinaryFileField(serializers.FileField):
 
 
 class ReferenceImportSerializer(serializers.ModelSerializer):
+    # The importer sets status and stats; uploads shouldn't be able to overwrite them.
     class Meta:
         model = ReferenceImport
         fields = "__all__"
@@ -142,6 +143,7 @@ class DatasetSerializer(serializers.ModelSerializer):
 
 
 class DatasetUploadSerializer(serializers.ModelSerializer):
+    # User details come from the authenticated website call, not the upload form.
     uploaded_file = serializers.FileField(required=True)
 
     class Meta:
@@ -199,6 +201,7 @@ class ReferenceSampleMeasurementInlineSerializer(serializers.ModelSerializer):
 
 
 class ReferenceLibrarySearchResultSerializer(serializers.ModelSerializer):
+    # Include deposit details and measurements so the page can show a sample in one request.
     deposit_name = serializers.CharField(
         source="reference_deposit.name",
         read_only=True,

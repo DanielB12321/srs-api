@@ -21,6 +21,7 @@ class LogDifferenceSimilarity(PairwiseSimilarity):
         reference_vector = prepared.reference_vector
 
         if not prepared.in_log_space:
+            # Preprocessing may have already logged these, so only do it once.
             input_vector = [log10(value) for value in input_vector]
             reference_vector = [log10(value) for value in reference_vector]
 
@@ -34,7 +35,6 @@ class LogDifferenceSimilarity(PairwiseSimilarity):
 
     def evidence(self, prepared):
         """Show which elements are closer or further apart than a tenfold gap."""
-        # A score of 0.5 represents a tenfold concentration difference and is
-        # used as the neutral point for an understandable signed contribution.
+        # Use a tenfold gap (score 0.5) as the dividing line for the evidence.
         effects = [score - 0.5 for score in self.element_scores(prepared)]
         return signed_evidence(prepared, effects)

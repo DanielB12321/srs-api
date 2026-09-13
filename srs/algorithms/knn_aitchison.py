@@ -73,7 +73,7 @@ class KnnAitchisonSimilarity(PairwiseSimilarity):
         left, right = self._clr_pair(prepared)
         differences = [a - b for a, b in zip(left, right)]
 
-        # ``weighted_dot`` keeps selected-element weights in the distance.
+        # Selected elements can count more towards the distance.
         distance = sqrt(weighted_dot(differences, differences, prepared.weights))
 
         return 1 / (1 + distance)
@@ -96,13 +96,12 @@ class KnnAitchisonSimilarity(PairwiseSimilarity):
         )
 
     def raw_scores(self, prepared):
-        """Return the algorithm-native metrics that sit beside the similarity."""
+        """Return the distance and rank correlation shown with the match."""
         left, right = self._clr_pair(prepared)
         differences = [a - b for a, b in zip(left, right)]
         distance = sqrt(weighted_dot(differences, differences, prepared.weights))
 
-        # Spearman correlation remains unweighted because weighted ranks are not
-        # part of the score and would be difficult to interpret.
+        # Spearman compares element order. It is an extra metric, not part of the score.
         rho = (
             _pearson(_average_ranks(left), _average_ranks(right))
             if len(left) >= 2
@@ -122,6 +121,7 @@ class KnnAitchisonSimilarity(PairwiseSimilarity):
         ]
         mean_squared = sum(weighted_squared) / len(weighted_squared)
 
+        # Elements with less disagreement than the average support this match.
         raw = [mean_squared - value for value in weighted_squared]
         total = sum(abs(value) for value in raw)
 
@@ -150,8 +150,7 @@ class KnnAitchisonSimilarity(PairwiseSimilarity):
     def compare(self, samples, references, config=None):
         """Rank references and add detail to the leading matches."""
         config = config or {}
-        # Materialised before ranking so the references can be revisited below
-        # even when a generator was passed in.
+        # Keep a list because we need to go through the references again below.
         reference_list = list(references)
         result = super().compare(samples, reference_list, config)
 

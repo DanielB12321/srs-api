@@ -25,7 +25,7 @@ class SRSServiceCaller:
     user_id: int | None = None
     email: str = ""
 
-    # The shared key authenticates the caller; these fields satisfy DRF.
+    # DRF expects these user fields, even though we log in with a shared key.
     is_authenticated: bool = True
     is_active: bool = True
     is_staff: bool = False
@@ -53,10 +53,11 @@ class SRSSharedKeyAuthentication(BaseAuthentication):
         expected_key = getattr(settings, "SRS_API_SHARED_KEY", "")
         supplied_key = request.headers.get(API_KEY_HEADER, "")
 
-        # An unset key must never make the API public by accident.
+        # If the server has no key set, reject the request rather than letting it through.
         if not expected_key:
             raise AuthenticationFailed("API authentication is not configured.")
 
+        # compare_digest checks the key without giving away matches through timing.
         if not supplied_key or not secrets.compare_digest(
             supplied_key.encode("utf-8"),
             expected_key.encode("utf-8"),
@@ -70,6 +71,7 @@ class SRSSharedKeyAuthentication(BaseAuthentication):
         return 'ApiKey realm="srs-api"'
 
     def _build_caller(self, request):
+        # These details tell us who used the website; the key above checks the caller.
         raw_user_id = request.headers.get(USER_ID_HEADER, "").strip()
         raw_email = request.headers.get(USER_EMAIL_HEADER, "").strip()
 

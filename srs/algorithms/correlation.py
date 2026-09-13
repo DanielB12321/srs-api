@@ -25,12 +25,13 @@ class CorrelationSimilarity(PairwiseSimilarity):
         reference_vector = prepared.reference_vector
         weights = prepared.weights
 
-        # Keep the existing log-difference fallback for one shared element.
+        # One shared element isn't enough for correlation, so compare its log difference.
         if len(input_vector) < 2:
             return LogDifferenceSimilarity().score_vectors(prepared)
 
         input_mean = weighted_mean(input_vector, weights)
         reference_mean = weighted_mean(reference_vector, weights)
+        # Compare how each element sits above or below its sample's average.
         input_centred = [value - input_mean for value in input_vector]
         reference_centred = [value - reference_mean for value in reference_vector]
 
@@ -40,6 +41,7 @@ class CorrelationSimilarity(PairwiseSimilarity):
             * weighted_dot(reference_centred, reference_centred, weights)
         ) ** 0.5
 
+        # Turn the -1 to 1 correlation into the 0 to 1 score used by the website.
         return (1 + numerator / denominator) / 2 if denominator else 0
 
     def evidence(self, prepared):

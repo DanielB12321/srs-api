@@ -104,6 +104,7 @@ class Command(BaseCommand):
             f"  {len(signatures)} samples, {deposits} deposits, {classes} classes"
         )
 
+        # Give every method the same library and settings so their scores are comparable.
         results = []
         for protocol in protocols:
             for algorithm_id in algorithm_ids:

@@ -15,6 +15,7 @@ class DistanceSimilarity(PairwiseSimilarity):
     capabilities = frozenset()
 
     def score_vectors(self, prepared):
+        # A smaller gap gets a higher score, then we average across the elements.
         element_scores = [
             1 / (1 + abs(left - right))
             for left, right in zip(prepared.input_vector, prepared.reference_vector)

@@ -3,7 +3,7 @@
 from math import isfinite
 
 
-# Each factor converts the supplied value to ppm.
+# Multiply by these factors so every algorithm compares values in ppm.
 _TO_PPM_FACTORS = {
     "": 1.0,
     "ppm": 1.0,

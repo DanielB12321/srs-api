@@ -84,6 +84,7 @@ def _read_csv(dataset):
             "Only CSV dataset uploads are currently supported."
         )
 
+    # utf-8-sig also handles the extra marker some spreadsheet exports add at the start.
     with dataset.uploaded_file.open("rb") as file:
         try:
             contents = file.read().decode("utf-8-sig")
@@ -217,7 +218,7 @@ def _validate_sample_codes(rows, sample_id_col):
 def _resolve_measurement_columns(measurement_columns):
     """Resolve one Element row for each measurement heading."""
     column_details = []
-    element_cache = {}
+    seen_symbols = set()
 
     for column in measurement_columns:
         symbol, unit = _split_element_and_unit(column)
@@ -227,23 +228,20 @@ def _resolve_measurement_columns(measurement_columns):
                 f"Measurement heading has no element: {column!r}."
             )
 
-        if symbol in element_cache:
+        if symbol in seen_symbols:
             raise ValueError(
                 f"Only one measurement column is allowed for element {symbol}."
             )
 
-        element = element_cache.get(symbol)
-
-        if element is None:
-            element, _ = Element.objects.get_or_create(
-                symbol=symbol,
-                defaults={
-                    "name": symbol,
-                    "default_unit": unit,
-                },
-            )
-
-            element_cache[symbol] = element
+        # The duplicate check above means each element only needs one lookup.
+        element, _ = Element.objects.get_or_create(
+            symbol=symbol,
+            defaults={
+                "name": symbol,
+                "default_unit": unit,
+            },
+        )
+        seen_symbols.add(symbol)
 
         column_details.append(
             (column, element, unit)
@@ -262,6 +260,7 @@ def _flush_measurements(pending_measurements):
         batch_size=MEASUREMENT_BATCH_SIZE,
     )
 
+    # Reuse this list for the next batch instead of keeping every measurement in memory.
     pending_measurements.clear()
 
 

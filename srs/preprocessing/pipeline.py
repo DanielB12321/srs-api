@@ -5,7 +5,7 @@ from math import log10
 
 from ..services.units import concentration_to_ppm
 
-# Stored with each run so previous results remain identifiable.
+# Save this with each run so we know which cleanup rules it used.
 PIPELINE_VERSION = "1.0"
 
 # Ways to handle measurements below their detection limit.
@@ -34,7 +34,7 @@ def normalise_symbol(symbol):
 
 @dataclass
 class PreparedVectors:
-    """Two aligned vectors and the metadata needed to score them."""
+    """Two lists with the same element order, plus their scoring settings."""
 
     symbols: list
     input_vector: list
@@ -78,7 +78,7 @@ def resolve_options(preprocessing=None, selected_elements=None):
 
     return {
         "normalise": normalise,
-        # CLR already works in log space, so a second log transform is not used.
+        # CLR already uses logs, so don't log the values a second time.
         "log_transform": bool(preprocessing.get("log_transform")) and not normalise,
         "handle_missing": censored_policy,
         "weighting_mode": weighting_mode,
@@ -129,7 +129,7 @@ def extract_values(measurements, options=None):
     options = options or resolve_options()
     censored_policy = options.get("handle_missing", SKIP)
 
-    # Boost mode keeps unselected elements so the selected ones can be weighted.
+    # In boost mode, keep all elements and give the selected ones more weight.
     selected = set(options.get("selected_elements") or [])
     restrict_to_selected = bool(selected) and (
         options.get("weighting_mode") != SELECTED_BOOST
@@ -202,13 +202,14 @@ def prepare_vectors(
     """Build aligned vectors from the elements shared by two samples."""
     options = options or resolve_options()
     imputed_elements = imputed_elements or set()
+    # Both lists must use the same order so Cu is compared with Cu, and so on.
     symbols = sorted(common_elements)
 
     input_vector = [input_values[symbol] for symbol in symbols]
     reference_vector = [reference_values[symbol] for symbol in symbols]
 
     if options.get("normalise"):
-        # CLR keeps relative element patterns rather than overall concentration.
+        # CLR compares the element pattern by logging values and subtracting their mean.
         input_vector = _centred_logs(input_vector)
         reference_vector = _centred_logs(reference_vector)
     elif options.get("log_transform"):

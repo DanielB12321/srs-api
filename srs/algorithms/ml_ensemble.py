@@ -1,4 +1,4 @@
-"""Inference adapter for the trained XGBoost and SVM ensemble."""
+"""Use the saved XGBoost and SVM models to score a sample pair."""
 
 from __future__ import annotations
 
@@ -86,6 +86,7 @@ def make_pair_features(prepared):
         else 0.0
     )
 
+    # Keep this exact feature order: the saved models were trained using these 20 positions.
     features = np.asarray(
         [
             float(left.size),
@@ -120,6 +121,7 @@ def make_pair_features(prepared):
     return features
 
 
+# Keep the loaded models in memory so we don't reopen the files for every comparison.
 @lru_cache(maxsize=1)
 def _load_artifacts():
     """Load trained model files once per Python worker process."""
@@ -182,6 +184,7 @@ class XgbSvmEnsembleSimilarity(PairwiseSimilarity):
         xgb_probability = float(xgb_model.predict_proba(features)[0, 1])
         svm_probability = float(svm_pipeline.predict_proba(features)[0, 1])
 
+        # Blend the two probabilities using the weights chosen during training.
         selected = manifest["selected_ensemble"]
         xgb_weight = float(selected["xgb_weight"])
         svm_weight = float(selected["svm_weight"])

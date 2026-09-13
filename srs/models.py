@@ -301,24 +301,21 @@ class FullAnalysis(models.Model):
     name = models.CharField(max_length=255, blank=True)
     uploaded_sample_code = models.CharField(max_length=100, blank=True)
     source_filename = models.CharField(max_length=255, blank=True)
-    # Snapshot of the complete submitted test sample. Keeping this on the
-    # analysis means future reads do not depend on the request format changing.
+    # Keep a copy of the submitted samples so results can be reopened later.
     sample_data = models.JSONField(default=dict, blank=True)
 
     method = models.CharField(max_length=100, default="log_difference_similarity")
     parameters = models.JSONField(default=dict, blank=True)
 
-    # Provenance for the run, promoted out of the parameters blob so results can
-    # be grouped and filtered by algorithm when comparing how they perform.
-    # Every field is optional: analyses saved before these existed keep working.
+    # Save the method and versions separately so runs are easy to compare.
+    # These can be blank for analyses saved before the fields were added.
     algorithm_id = models.CharField(max_length=100, blank=True, default="")
     algorithm_version = models.CharField(max_length=20, blank=True, default="")
     pipeline_version = models.CharField(max_length=20, blank=True, default="")
     reference_library_version = models.CharField(max_length=255, blank=True, default="")
     runtime_ms = models.FloatField(null=True, blank=True)
 
-    # Optional envelope blocks. Only filled in by algorithms that declare the
-    # matching capability, so they stay null for the concentration-based methods.
+    # Extra result sections stay blank when the algorithm doesn't provide them.
     sample_results = models.JSONField(null=True, blank=True)
     projection = models.JSONField(null=True, blank=True)
     element_associations = models.JSONField(null=True, blank=True)
@@ -359,7 +356,7 @@ class GeochemicalSignature(models.Model):
         related_name="signatures",
     )
     kind = models.CharField(max_length=20, choices=KIND_CHOICES)
-    # Composite profiles use -1; sample profiles use their zero-based row index.
+    # -1 means the combined profile; 0, 1, 2, etc. refer to individual sample rows.
     sample_index = models.IntegerField(default=-1)
     sample_code = models.CharField(max_length=100, blank=True)
     representative_method = models.CharField(max_length=30)
@@ -428,8 +425,8 @@ class FullAnalysisMatch(models.Model):
         blank=True,
     )
 
-    # Zero-based position of the tested sample inside FullAnalysis.sample_data.
-    # This lets one uploaded CSV analysis own a separate ranking per input row.
+    # Which input row this match belongs to, starting from 0.
+    # Each row in an uploaded CSV gets its own ranking.
     analysed_sample_index = models.PositiveIntegerField(default=0)
     rank = models.PositiveIntegerField()
     similarity_score = models.FloatField()
@@ -438,7 +435,7 @@ class FullAnalysisMatch(models.Model):
     scores = models.JSONField(null=True, blank=True)
     confidence = models.JSONField(null=True, blank=True)
 
-    # Per-element evidence is also limited by the ``detail_top_n`` parameter.
+    # Evidence is saved for the top matches first, then for others as they are opened.
     evidence = models.JSONField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)

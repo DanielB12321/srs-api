@@ -11,6 +11,7 @@ from .log_difference import LogDifferenceSimilarity
 # Used when no valid default is configured.
 FALLBACK_ALGORITHM_ID = "knn_aitchison"
 
+# Adding a class here makes it available in the website's method picker.
 ALGORITHMS = {
     algorithm.id: algorithm
     for algorithm in (
@@ -38,7 +39,7 @@ def get_algorithm(algorithm_id=None):
     if algorithm_class is None:
         algorithm_class = ALGORITHMS[default_algorithm_id()]
 
-    # Instances do not share state between background analysis threads.
+    # Give each call its own algorithm object so background runs don't share state.
     return algorithm_class()
 
 

@@ -51,6 +51,7 @@ class Command(BaseCommand):
                 / "ml_ensemble"
             )
 
+        # Optional JSON lets a training run use the same preprocessing choices as the API.
         preprocessing_request = None
         preprocessing_path = options.get("preprocessing_json")
         if preprocessing_path:

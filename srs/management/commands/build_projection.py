@@ -94,6 +94,7 @@ class Command(BaseCommand):
         return points
 
     def build_tsne(self, signatures, options):
+        # Use the PCA element set and fill missing values before making the t-SNE layout.
         # t-SNE needs a dense matrix, so the same CLR construction the live
         # projection uses is applied first.
         model = fit_pca([signature["values"] for signature in signatures])

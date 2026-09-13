@@ -15,11 +15,12 @@ from .preprocessing import (
 
 
 def _signature_values(measurements, options):
-    """Return canonical ppm values and their transformed profile values."""
+    """Keep the cleaned ppm values alongside the values used for comparison."""
     raw_values, imputed = extract_values(measurements, options)
     if not raw_values:
         return {}, {}, []
 
+    # Use the same sample on both sides to apply the normal analysis transforms.
     prepared = prepare_vectors(
         raw_values,
         raw_values,
@@ -77,6 +78,8 @@ def build_analysis_signatures(samples, preprocessing=None, selected_elements=Non
         for values in sample_raw_values
         for symbol in values
     })
+    # Take each element's median in ppm first, then transform that combined profile.
+    # Missing values are left out, rather than counted as zero.
     composite_raw = {
         symbol: median([
             values[symbol]
@@ -126,6 +129,7 @@ def save_analysis_signatures(
         preprocessing,
         selected_elements,
     )
+    # The transaction keeps the old profiles if saving their replacements fails.
     full_analysis.signatures.all().delete()
     GeochemicalSignature.objects.bulk_create([
         GeochemicalSignature(full_analysis=full_analysis, **profile)

@@ -7,13 +7,14 @@ DEFAULT_PERPLEXITY = 30.0
 DEFAULT_ITERATIONS = 500
 DEFAULT_LEARNING_RATE = 200.0
 
-# Early exaggeration separates clusters before the normal optimisation stage.
+# Start by pulling similar points together more strongly to help the clusters form.
 _EARLY_EXAGGERATION = 4.0
 _EARLY_ITERATIONS = 100
 
 
 def _squared_distances(vectors):
     n = len(vectors)
+    # Each pair has the same distance in both directions, so calculate it once.
     distances = [[0.0] * n for _ in range(n)]
 
     for i in range(n):
@@ -76,7 +77,7 @@ def _joint_probabilities(vectors, perplexity):
             position += 1
         conditional.append(full)
 
-    # Make the affinity between each pair symmetric.
+    # Give each pair the same closeness value in both directions.
     joint = [[0.0] * n for _ in range(n)]
     scale = 2 * n
     for i in range(n):
@@ -102,6 +103,7 @@ def fit_tsne(
     perplexity = min(perplexity, max(2.0, (n - 1) / 3))
     joint = _joint_probabilities(vectors, perplexity)
 
+    # Start from small random positions, using a seed so reruns start in the same place.
     rng = random.Random(seed)
     embedding = [[rng.gauss(0, 1e-2), rng.gauss(0, 1e-2)] for _ in range(n)]
     velocity = [[0.0, 0.0] for _ in range(n)]
@@ -113,7 +115,7 @@ def fit_tsne(
         )
         momentum = 0.5 if iteration < 20 else 0.8
 
-        # Student-t affinities in the embedding, and the normaliser for them.
+        # Work out how close each pair is in the current 2D layout.
         numerators = [[0.0] * n for _ in range(n)]
         total = 0.0
         for i in range(n):

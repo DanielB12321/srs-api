@@ -54,6 +54,7 @@ class Command(BaseCommand):
             wb.close()
 
     def _seed_elements(self) -> int:
+        # Update existing symbols too, so running this again doesn't make duplicates.
         count = 0
         for symbol, name, atomic_number, default_unit in ELEMENTS:
             Element.objects.update_or_create(

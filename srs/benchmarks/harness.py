@@ -106,11 +106,7 @@ def load_signatures(preprocessing=None, class_field=DEFAULT_CLASS_FIELD):
 
 
 def majority_class_baseline(signatures):
-    """
-    The score from always guessing the commonest class.
-
-    This gives the accuracy of always selecting the most common class.
-    """
+    """Accuracy we'd get by always guessing the most common deposit class."""
     if not signatures:
         return 0.0
 
@@ -121,7 +117,7 @@ def majority_class_baseline(signatures):
 def _library_for(query, signatures, protocol):
     """Return the references a query is allowed to be matched against."""
     if protocol == LEAVE_ONE_DEPOSIT_OUT:
-        # Withhold every sample belonging to the query deposit.
+        # Leave out the whole deposit so it can't match against its own samples.
         return [
             signature
             for signature in signatures
@@ -205,6 +201,7 @@ def run_benchmark(
             hits_at_5 += 1
             bucket["top_5"] += 1
 
+        # Reward finding the right class near the top: first gets 1, second gets 1/2, etc.
         for rank, label in enumerate(retrieved, start=1):
             if label == truth:
                 reciprocal_ranks += 1 / rank
