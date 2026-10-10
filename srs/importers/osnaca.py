@@ -19,9 +19,15 @@ from ..models import (
     ReferenceSampleMeasurement,
 )
 from .headers import flatten_headers, header_label
-from .seed_data import ELEMENTS, ELEMENT_METHOD_OVERRIDES, NON_ELEMENT_COLUMNS
+from .seed_data import (
+    ELEMENTS,
+    ELEMENT_METHOD_OVERRIDES,
+    NON_ELEMENT_COLUMNS,
+    PERCENT,
+)
 
 _NUMERIC_RE = re.compile(r"-?\d+(?:\.\d+)?")
+_PPM_PER_PERCENT = 10000.0
 
 
 def _to_float(value) -> float | None:
@@ -34,6 +40,17 @@ def _to_float(value) -> float | None:
         match = _NUMERIC_RE.search(str(value))
         parsed = float(match.group(0)) if match else None
     return parsed if parsed is not None and isfinite(parsed) else None
+
+
+def _measurement_value_in_default_unit(value, unit):
+    """Convert the OSNACA workbook's ppm values to the stored display unit."""
+    if value is None:
+        return None
+    if unit == PERCENT:
+        return value / _PPM_PER_PERCENT
+    # One ppm is numerically equal to one g/t, so precious metals need no
+    # numeric conversion when their display unit is g/t.
+    return value
 
 
 def run_import(import_id: int) -> ReferenceImport:
@@ -371,13 +388,16 @@ def load_measurements(data_wb, import_row, samples_by_code, stats, errors):
                     )
                     continue
 
+                unit = element.default_unit
                 below = False
                 detection_limit = None
-                value = cell
+                value = _measurement_value_in_default_unit(cell, unit)
                 # OSNACA uses a negative number to mark the detection limit, not a real value.
                 if cell < 0:
                     below = True
-                    detection_limit = abs(cell)
+                    detection_limit = _measurement_value_in_default_unit(
+                        abs(cell), unit
+                    )
                     value = None
 
                 rows_to_create.append(
@@ -387,7 +407,7 @@ def load_measurements(data_wb, import_row, samples_by_code, stats, errors):
                         element=element,
                         analytical_method=method,
                         value=value,
-                        unit=element.default_unit,
+                        unit=unit,
                         below_detection_limit=below,
                         detection_limit=detection_limit,
                     )
@@ -396,6 +416,14 @@ def load_measurements(data_wb, import_row, samples_by_code, stats, errors):
     ReferenceSampleMeasurement.objects.bulk_create(
         rows_to_create,
         batch_size=2000,
-        ignore_conflicts=True,
+        update_conflicts=True,
+        unique_fields=["reference_sample", "element", "analytical_method"],
+        update_fields=[
+            "import_ref",
+            "value",
+            "unit",
+            "below_detection_limit",
+            "detection_limit",
+        ],
     )
     stats["measurements"] = len(rows_to_create)
