@@ -61,9 +61,31 @@ sample_id,latitude,longitude,Cu_ppm,Au_ppm
 S001,-27.47,153.03,120.5,0.42
 ```
 
-Blank and non-numeric measurements are stored as missing values. `NaN` and
-infinite values are rejected. Coordinates, when supplied, must use normal
-latitude and longitude ranges.
+Each measurement heading must name a known element (`<Element>_<unit>`, in any
+letter case); headings with method or digestion suffixes such as
+`As_partial_ppm` are rejected with a message naming the column. Blank
+measurements are stored as missing values. Non-numeric, `NaN` and infinite
+values are rejected. Coordinates, when supplied, must use normal latitude and
+longitude ranges.
+
+## Similarity algorithms
+
+Three algorithms are registered in `srs/algorithms/__init__.py`:
+`knn_aitchison` (default), `log_difference_similarity` and `correlation`.
+`GET /api/algorithms/` lists them, and SRS_QUT builds its algorithm picker from
+that response, so adding or removing an algorithm from the registry needs no
+front-end change. The default is set with `SRS_DEFAULT_ALGORITHM`; an
+unrecognised value falls back to the registry default.
+
+Preprocessing (unit conversion, below-detection policy, CLR, weighting) runs in
+`srs/preprocessing/` before any algorithm scores a pair, so every algorithm
+receives the same values.
+
+To reproduce the recorded evaluation figures (leave-one-deposit-out, CLR on):
+
+```powershell
+python manage.py benchmark_algorithms --normalise --per-class
+```
 
 ## Reference-library commands
 
@@ -97,8 +119,9 @@ deploys the `main` branch.
 ## Azure deployment
 
 Configure `SECRET_KEY`, `SRS_API_SHARED_KEY`, `DATABASE_URL`, `ALLOWED_HOSTS` and
-`CORS_ALLOWED_ORIGINS` in Azure App Settings. Use the same shared API key in the
-SRS_QUT deployment, then restart both applications.
+`CORS_ALLOWED_ORIGINS` in Azure App Settings (`SRS_DEFAULT_ALGORITHM` is
+optional). Use the same shared API key in the SRS_QUT deployment, then restart
+both applications.
 
 Run `python manage.py migrate` against the deployment database whenever new
 migrations are released. Uploaded workbooks also need persistent media storage
