@@ -87,6 +87,46 @@ class DatasetImportTests(TestCase):
         dataset.refresh_from_db()
         self.assertEqual(dataset.status, Dataset.STATUS_FAILED)
 
+    def test_unrecognised_measurement_headings_are_rejected_by_name(self):
+        # prevents any unrecognised heading, for example, "As_partial" becoming a permenant element row
+        # as it can never match a reference measurement.
+        dataset = self.create_dataset(
+            "sample_id,Cu_ppm,As_partial_ppm\nS1,10,5\n"
+        )
+
+        with self.assertRaisesRegex(ValueError, "As_partial_ppm"):
+            run_dataset_import(dataset.id)
+
+        dataset.refresh_from_db()
+        self.assertEqual(dataset.status, Dataset.STATUS_FAILED)
+        self.assertFalse(Element.objects.filter(symbol="As_partial").exists())
+
+    def test_overlong_headings_fail_validation_instead_of_the_database(self):
+        # Element.symbol is a 10-character column; anything longer used to
+        # surface as a 500 from the database rather than a clear message.
+        dataset = self.create_dataset(
+            "sample_id,Cu_ppm,As_partialdigest_ppm\nS1,10,5\n"
+        )
+
+        with self.assertRaisesRegex(ValueError, "As_partialdigest_ppm"):
+            run_dataset_import(dataset.id)
+
+        dataset.refresh_from_db()
+        self.assertEqual(dataset.status, Dataset.STATUS_FAILED)
+        self.assertEqual(Element.objects.count(), 0)
+
+    def test_upper_case_lab_headings_map_to_the_canonical_symbol(self):
+        dataset = self.create_dataset("sample_id,AU_PPB,cu_ppm\nS1,12,10\n")
+
+        run_dataset_import(dataset.id)
+        dataset.refresh_from_db()
+
+        self.assertEqual(dataset.status, Dataset.STATUS_COMPLETED)
+        self.assertEqual(
+            list(Element.objects.order_by("symbol").values_list("symbol", flat=True)),
+            ["Au", "Cu"],
+        )
+
     def test_coordinates_outside_real_world_ranges_are_rejected(self):
         dataset = self.create_dataset(
             "sample_id,latitude,longitude,Cu_ppm\nS1,95,153,10\n"

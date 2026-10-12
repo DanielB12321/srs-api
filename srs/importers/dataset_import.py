@@ -9,6 +9,18 @@ from django.utils import timezone
 
 from srs.models import Dataset, Element, Sample, SampleMeasurement
 
+from .seed_data import ELEMENTS
+
+# The elements a measurement heading may name, keyed by canonical symbol.
+# Anything else is rejected rather than created: a heading like "As_partial"
+# or "lithology" would otherwise become a permanent Element row that never
+# matches a reference measurement, and anything over the 10-character symbol
+# column would fail inside the database instead of with a clear message.
+KNOWN_ELEMENTS = {
+    symbol: (name, default_unit)
+    for symbol, name, _atomic_number, default_unit in ELEMENTS
+}
+
 # Accepted headings for the required sample fields.
 SAMPLE_ID_COLUMNS = {"sample_id", "sample", "sample_code", "id"}
 LATITUDE_COLUMNS = {"latitude", "lat", "y"}
@@ -221,11 +233,23 @@ def _resolve_measurement_columns(measurement_columns):
     seen_symbols = set()
 
     for column in measurement_columns:
-        symbol, unit = _split_element_and_unit(column)
+        raw_symbol, unit = _split_element_and_unit(column)
 
-        if not symbol:
+        if not raw_symbol:
             raise ValueError(
                 f"Measurement heading has no element: {column!r}."
+            )
+
+        # Lab exports include all caps ("AU_PPB"); accept any case but store the
+        # canonical symbol so one element never ends up as several rows.
+        symbol = raw_symbol[0].upper() + raw_symbol[1:].lower()
+
+        if symbol not in KNOWN_ELEMENTS:
+            raise ValueError(
+                f"Column {column!r} is not a recognised element measurement. "
+                "Name measurement columns as <element>_<unit>, for example "
+                "Au_ppb, Cu_ppm or Fe_pct, and remove any method or "
+                "digestion suffixes."
             )
 
         if symbol in seen_symbols:
@@ -233,12 +257,13 @@ def _resolve_measurement_columns(measurement_columns):
                 f"Only one measurement column is allowed for element {symbol}."
             )
 
+        name, default_unit = KNOWN_ELEMENTS[symbol]
         # The duplicate check above means each element only needs one lookup.
         element, _ = Element.objects.get_or_create(
             symbol=symbol,
             defaults={
-                "name": symbol,
-                "default_unit": unit,
+                "name": name,
+                "default_unit": default_unit or unit,
             },
         )
         seen_symbols.add(symbol)
